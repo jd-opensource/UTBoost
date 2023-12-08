@@ -1,0 +1,11 @@
+include README.md
+include utboost/LICENSE
+include utboost/NOTICE-Third-Party
+include utboost/CMakeLists.txt
+
+recursive-include utboost *.py
+recursive-include utboost/include *
+recursive-include utboost/src *
+
+global-exclude */.ipynb_checkpoints/*
+global-exclude *.py[oc]
