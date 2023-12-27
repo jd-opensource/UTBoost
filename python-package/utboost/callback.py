@@ -1,4 +1,4 @@
-# coding: utf-8
+# -*- coding:utf-8 -*-
 import time
 from typing import Dict, List
 from .basic import _ModelBase, Logger, TrainingStopException
@@ -75,18 +75,18 @@ class EvalCallback(AbstractCallback):
                     logs[data][metric] = list()
                 logs[data][metric].append(score)
 
-            Logger.info('\t'.join(eval_list) + '\ttotal: {:.2f}s'.format(time.time() - self.start_time))
+            Logger.info("\t".join(eval_list) + "\ttotal: {:.2f}s".format(time.time() - self.start_time))
 
 
 class EarlyStopCallback(AbstractCallback):
 
     _bigger_better = {
-        'auc': True,
-        'qini_coff': True,
-        'qini_area': True,
-        'logloss': False,
-        'rmse': False,
-        'l2': False
+        "auc": True,
+        "qini_coff": True,
+        "qini_area": True,
+        "logloss": False,
+        "rmse": False,
+        "l2": False
     }
 
     def __init__(self, stop_round: int, data_name: str, metric_name: str, use_best: bool):

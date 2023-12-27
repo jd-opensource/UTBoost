@@ -35,7 +35,8 @@ class TreeLearner {
    * \param is_first_tree If linear tree learning is enabled, first tree needs to be handled differently
    * \return A trained tree
    */
-  virtual Tree* Train(const score_t* gradients, const score_t* hessians, bool is_first_tree, const SplitCriteria* split_criteria) = 0;
+  virtual Tree* Train(const score_t* gradients, const score_t* hessians, bool is_first_tree,
+                      const SplitCriteria* split_criteria) = 0;
 
   /*!
    * \brief Set bagging data
@@ -43,9 +44,7 @@ class TreeLearner {
    * \param used_indices Used data indices
    * \param num_data Number of used data
    */
-  virtual void SetBaggingData(const Dataset* subset,
-                              const data_size_t* used_indices,
-                              data_size_t num_data) = 0;
+  virtual void SetBaggingData(const Dataset* subset, const data_size_t* used_indices, data_size_t num_data) = 0;
 
   /*!
    * \brief Using last trained tree to predict score then adding to out_score;
@@ -54,7 +53,9 @@ class TreeLearner {
   virtual void AddPredictionToScore(const Tree* tree, double* out_score) const = 0;
 
   /*! \brief Renew tree output (value) by other data, used for honesty estimation. */
-  virtual void RenewTreeOutputByIndices(Tree* tree, const SplitCriteria* split_criteria, const data_size_t* bag_indices, data_size_t bag_cnt, const score_t* gradients, const score_t* hessians) const = 0;
+  virtual void RenewTreeOutputByIndices(Tree* tree, const SplitCriteria* split_criteria,
+                                        const data_size_t* bag_indices, data_size_t bag_cnt,
+                                        const score_t* gradients, const score_t* hessians) const = 0;
 
   /*! \brief default constructor */
   TreeLearner() = default;

@@ -12,14 +12,14 @@ if(MSVC)
     endif()
 
 	set(variables
-		CMAKE_C_FLAGS_DEBUG
-		CMAKE_C_FLAGS_MINSIZEREL
-		CMAKE_C_FLAGS_RELEASE
-		CMAKE_C_FLAGS_RELWITHDEBINFO
-		CMAKE_CXX_FLAGS_DEBUG
-		CMAKE_CXX_FLAGS_MINSIZEREL
-		CMAKE_CXX_FLAGS_RELEASE
-		CMAKE_CXX_FLAGS_RELWITHDEBINFO
+        CMAKE_C_FLAGS_DEBUG
+        CMAKE_C_FLAGS_MINSIZEREL
+        CMAKE_C_FLAGS_RELEASE
+        CMAKE_C_FLAGS_RELWITHDEBINFO
+        CMAKE_CXX_FLAGS_DEBUG
+        CMAKE_CXX_FLAGS_MINSIZEREL
+        CMAKE_CXX_FLAGS_RELEASE
+        CMAKE_CXX_FLAGS_RELWITHDEBINFO
 	)
 
     if(USE_DEBUG)
@@ -84,10 +84,6 @@ endif()
 
 if(BUILD_TEST)
     message(STATUS "Building C++ tests with GoogleTest")
-    add_subdirectory(test/lib/googletest)
-    include_directories(${gtest_SOURCE_DIR}/include ${gtest_SOURCE_DIR})
-    file(GLOB CPP_TEST_SOURCES test/*.cpp)
-    add_executable(Google_Tests_run ${CPP_TEST_SOURCES})
     if(MSVC)
         set(
             CompilerFlags
@@ -102,7 +98,28 @@ if(BUILD_TEST)
         string(REPLACE "/MD" "/MT" ${CompilerFlag} "${${CompilerFlag}}")
     endforeach()
     endif()
-    target_link_libraries(Google_Tests_run _${PROJECT_NAME} gtest gtest_main)
+
+    include(FetchContent)
+    FetchContent_Declare(gtest
+        QUIET
+        URL https://github.com/google/googletest/archive/release-1.10.0.tar.gz
+    )
+    # configure build of googletest
+    set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+    set(BUILD_GMOCK OFF CACHE BOOL "" FORCE)
+    set(BUILD_GTEST ON CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(gtest)
+
+    file(GLOB CPP_TEST_SOURCES tests/cpp/*.cpp)
+
+    add_executable(test_utboost ${CPP_TEST_SOURCES})
+
+    target_link_libraries(test_utboost
+        PRIVATE
+        _${PROJECT_NAME}
+        gtest
+        gtest_main
+    )
 endif()
 
 install(TARGETS _${PROJECT_NAME} DESTINATION ${UTBOOST_INSTALL_LIB_DIR})

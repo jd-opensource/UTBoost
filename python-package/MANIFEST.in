@@ -2,6 +2,7 @@ include README.md
 include utboost/LICENSE
 include utboost/NOTICE-Third-Party
 include utboost/CMakeLists.txt
+include utboost/VERSION
 
 recursive-include utboost *.py
 recursive-include utboost/include *

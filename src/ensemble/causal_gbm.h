@@ -214,8 +214,6 @@ class CausalGBM : public EnsembleModel {
   std::vector<std::unique_ptr<Tree>> models_;
   /*! \brief Max feature index of training data*/
   int max_feature_idx_;
-  /*! \brief Parser config file content */
-  std::string parser_config_str_ = "";
   /*! \brief First order derivative of training data */
   std::vector<score_t> gradients_;
   /*! \brief Second order derivative of training data */
@@ -234,12 +232,8 @@ class CausalGBM : public EnsembleModel {
   int start_iteration_for_pred_;
   /*! \brief Shrinkage rate for one iteration */
   double shrinkage_rate_;
-  /*! \brief Feature names */
-  std::vector<std::string> feature_names_;
   std::unique_ptr<ObjectiveFunction> loaded_objective_;
   bool average_output_;
-  std::string loaded_parameter_;
-  std::vector<int8_t> monotone_constraints_;
   std::unique_ptr<SampleStrategy> data_sample_strategy_;
 };
 

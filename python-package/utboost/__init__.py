@@ -1,7 +1,15 @@
-# coding: utf-8
+# -*- coding:utf-8 -*-
+import os
+
 from .core import UTBClassifier, UTBRegressor
 from .basic import Dataset, read_libsvm
 
-__version__ = '0.1.5'
+with open(os.path.join(os.path.dirname(__file__), "VERSION")) as f:
+    __version__ = f.read().strip()
 
-__all__ = ['Dataset', 'UTBClassifier', 'UTBRegressor', 'read_libsvm']
+__all__ = [
+    "Dataset",
+    "UTBClassifier",
+    "UTBRegressor",
+    "read_libsvm"
+]

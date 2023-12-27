@@ -120,7 +120,7 @@ struct Config {
    * \brief Parse config from c_str
    * \param args parameter string
    */
-  UTBOOST_EXPORT void ParseParameters(const char* args);
+  void ParseParameters(const char* args);
 
   std::string ToString() const { return ""; }
 

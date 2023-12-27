@@ -38,15 +38,6 @@ class SampleStrategy {
 
   std::vector<data_size_t>& bag_data_indices() { return bag_data_indices_; }
 
-  void UpdateObjectiveFunction(const ObjectiveFunction* objective_function) {
-    objective_function_ = objective_function;
-  }
-
-  void UpdateTrainingData(const Dataset* train_data) {
-    train_data_ = train_data;
-    num_data_ = train_data->GetNumSamples();
-  }
-
  protected:
   const Config* config_;
   const Dataset* train_data_;

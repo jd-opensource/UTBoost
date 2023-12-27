@@ -1,15 +1,15 @@
-# coding: utf-8
+# -*- coding:utf-8 -*-
 import ctypes
 import warnings
 import json
 import numpy as np
 
+from numpy import ndarray
 from copy import deepcopy
 from typing import Any, Dict, List, Tuple, Union, Optional
 
-from numpy import ndarray
-
 from .libpath import find_lib_path
+from .validation import is_numpy_2d_array, is_numpy_1d_array, check_consistent_length
 
 _EvalRetType = Tuple[str, str, float]  # data, metric, score
 _ModelHandle = ctypes.c_void_p
@@ -33,17 +33,9 @@ class TrainingStopException(Exception):
     pass
 
 
-def _is_numpy_2d_array(data: Any) -> bool:
-    return isinstance(data, np.ndarray) and len(data.shape) == 2 and data.shape[1] > 1
-
-
-def _is_numpy_1d_array(data: Any) -> bool:
-    return isinstance(data, np.ndarray) and len(data.shape) == 1
-
-
 def _c_str(string: str) -> ctypes.c_char_p:
     """Convert a Python string to C string."""
-    return ctypes.c_char_p(string.encode('utf-8'))
+    return ctypes.c_char_p(string.encode("utf-8"))
 
 
 def _safe_call(ret: int) -> None:
@@ -55,7 +47,7 @@ def _safe_call(ret: int) -> None:
         The return value from C API calls.
     """
     if ret != 0:
-        raise RuntimeError(_LIB.UTB_GetLastError().decode('utf-8'))
+        raise RuntimeError(_LIB.UTB_GetLastError().decode("utf-8"))
 
 
 class FileParser:
@@ -244,21 +236,21 @@ class Result:
 
 
 def get_leaf_value(node, features):
-    if 'left_child' in node.keys():
-        feature = features[node['split_feature']]
+    if "left_child" in node.keys():
+        feature = features[node["split_feature"]]
         if feature is None:
-            if node['missing_as_zero']:
+            if node["missing_as_zero"]:
                 feature = 0.0
-            elif node['default_left']:
-                return get_leaf_value(node['left_child'], features)
+            elif node["default_left"]:
+                return get_leaf_value(node["left_child"], features)
             else:
-                return get_leaf_value(node['right_child'], features)
-        if feature <= node['threshold']:
-            return get_leaf_value(node['left_child'], features)
+                return get_leaf_value(node["right_child"], features)
+        if feature <= node["threshold"]:
+            return get_leaf_value(node["left_child"], features)
         else:
-            return get_leaf_value(node['right_child'], features)
+            return get_leaf_value(node["right_child"], features)
     else:
-        return node['leaf_value']
+        return node["leaf_value"]
 
 
 def apply_model(float_features):
@@ -297,7 +289,7 @@ class Dataset:
         """
         Initializes a Dataset object with input data, treatment, weight, label, and reference.
         """
-        if not _is_numpy_2d_array(data):
+        if not is_numpy_2d_array(data):
             raise ValueError("data type is not 2d-array.")
         self.data = data
         self.meta = dict()
@@ -306,12 +298,11 @@ class Dataset:
                 self.meta[name] = value
         self.reference = reference
         for key, value in self.meta.items():
-            if not _is_numpy_1d_array(value):
+            if not is_numpy_1d_array(value):
                 raise ValueError("{name} type is not 1d-array.".format(name=key))
-            if value.shape[0] != self.data.shape[0]:
-                raise ValueError("{name} shape {s1} does not match data shape {s2}.".format(name=key,
-                                                                                            s1=value.shape[0],
-                                                                                            s2=self.data.shape[0]))
+
+            check_consistent_length(self.data, value)
+
         self.handle = None
         self.parameter_str = ""
         self.param_names = ["seed", "min_data_in_bin", "bin_construct_sample_cnt", "max_bin"]
@@ -320,6 +311,7 @@ class Dataset:
     def __del__(self) -> None:
         if self.handle is not None:
             _safe_call(_LIB.UTB_DatasetFree(self.handle))
+            self.handle = None
 
     def _count_treatment(self) -> int:
         """
@@ -337,12 +329,12 @@ class Dataset:
         for name in self.param_names:
             if name in param.keys():
                 kv_list.append("{name}={value}".format(name=name, value=param[name]))
-        return '\t'.join(kv_list)
+        return "\t".join(kv_list)
 
     def _set_field(self):
         """ Sets the fields of the Dataset object. """
         for name, value in self.meta.items():
-            if name == 'treatment':
+            if name == "treatment":
                 data = np.array(value.reshape(value.size), dtype=np.int32)
                 data_ptr = data.ctypes.data_as(ctypes.POINTER(ctypes.c_int32))
             else:
@@ -419,16 +411,17 @@ class _ModelBase:
             self.handle = ctypes.c_void_p()
             self.load_from_file(model_file)
         else:
-            raise ValueError("train_dataset and model_file are both None type, model can not be created.")
+            raise ValueError("Since both train_dataset and model_file are None types, the model cannot be created.")
 
     def __del__(self) -> None:
         if self.handle is not None:
             _safe_call(_LIB.UTB_BoosterFree(self.handle))
+            self.handle = None
 
     def add_valid_dataset(self, valid: Dataset):
         """ Adds a validation dataset to the model. """
         if self.train_dataset is None:
-            raise Exception("valid dataset can not be added to model while train dataset is None type.")
+            raise Exception("A valid dataset cannot be added to the model while the training dataset is of None type.")
 
         if valid.reference is not self.train_dataset:
             valid = deepcopy(valid)
@@ -449,15 +442,15 @@ class _ModelBase:
         buffer = []
         for key, value in params.items():
             if isinstance(value, list):
-                buffer.append("{name}={value}".format(name=key, value=','.join(value)))
+                buffer.append("{name}={value}".format(name=key, value=",".join(value)))
             else:
                 buffer.append("{name}={value}".format(name=key, value=value))
-        return '\t'.join(buffer)
+        return "\t".join(buffer)
 
     def train_one_iter(self) -> bool:
         """ Trains the model for one iteration. """
         if self.train_dataset is None:
-            raise Exception("model can not be trained while train dataset is None type.")
+            raise Exception("The model cannot be trained if the training dataset is of None type.")
         is_finished = ctypes.c_int(0)
         _safe_call(_LIB.UTB_BoosterUpdateOneIter(
             self.handle,
@@ -482,9 +475,9 @@ class _ModelBase:
                 result.ctypes.data_as(ctypes.POINTER(ctypes.c_double))
             ))
             if out_len.value != n_metric:
-                raise ValueError("eval results do not equal to metric size")
+                raise ValueError("The evaluation results do not match the metric size.")
             for i in range(n_metric):
-                buffer.append(('train', self.params["metric"][i], result[i]))
+                buffer.append(("train", self.params["metric"][i], result[i]))
 
         for idx in range(len(self.valid_sets)):
             result = np.empty(n_metric, dtype=np.float64)
@@ -496,16 +489,16 @@ class _ModelBase:
                 result.ctypes.data_as(ctypes.POINTER(ctypes.c_double))
             ))
             if out_len.value != n_metric:
-                raise ValueError("eval results do not equal to metric size")
+                raise ValueError("The evaluation results do not match the metric size.")
             for i in range(n_metric):
-                buffer.append(('valid-{:d}'.format(idx), self.params["metric"][i], result[i]))
+                buffer.append(("valid-{:d}".format(idx), self.params["metric"][i], result[i]))
 
         return buffer
 
     def rollback(self, iters: int) -> bool:
         """ Rolls back the model to a previous iteration. """
         if iters > self.iters.value:
-            raise ValueError("rollback iters {:d} is greater than tree size {:d}".format(iters, self.iters.value))
+            raise ValueError("Rollback iters {:d} exceed the number of trees {:d}.".format(iters, self.iters.value))
         for _ in range(self.iters.value - iters):
             _safe_call(_LIB.UTB_BoosterRollbackOneIter(self.handle))
             self.iters.value -= 1
@@ -524,12 +517,12 @@ class _ModelBase:
              filename: str,
              start_iteration: int = 0,
              num_iteration: Optional[int] = None,
-             format='utm',
-             importance_type: str = 'split'):
+             format="utm",
+             importance_type: str = "split"):
         """ Saves the model to a file in the specified format. """
         num_iteration = -1 if num_iteration is None else num_iteration
-        imp_type = 0 if importance_type == 'split' else 1
-        if format == 'utm':
+        imp_type = 0 if importance_type == "split" else 1
+        if format == "utm":
             _safe_call(_LIB.UTB_BoosterSaveModel(
                 self.handle,
                 ctypes.c_int(start_iteration),
@@ -537,29 +530,29 @@ class _ModelBase:
                 ctypes.c_int(imp_type),
                 _c_str(str(filename))
             ))
-        elif format == 'json':
+        elif format == "json":
             _safe_call(_LIB.UTB_BoosterDumpModelToFile(
                 self.handle,
                 ctypes.c_int(start_iteration),
                 ctypes.c_int(num_iteration),
                 _c_str(str(filename))
             ))
-        elif format == 'py':
+        elif format == "py":
             model = self.to_json(start_iteration, num_iteration)
             # using code template
             model_str = _model_py.format(
-                n_trees=len(model['tree_info']),
-                n_treatments=model['num_treat'],
-                max_fidx=model['max_feature_idx'],
-                n_features=model['max_feature_idx'] + 1,
-                sigmoid=1 if model['objective'] == 'logloss' else 0,
-                avg=int(model['average_output']),
-                trees=',\n'.join([str(tree['tree_structure']) for tree in model['tree_info']])
+                n_trees=len(model["tree_info"]),
+                n_treatments=model["num_treat"],
+                max_fidx=model["max_feature_idx"],
+                n_features=model["max_feature_idx"] + 1,
+                sigmoid=1 if model["objective"] == "logloss" else 0,
+                avg=int(model["average_output"]),
+                trees=",\n".join([str(tree["tree_structure"]) for tree in model["tree_info"]])
             )
-            with open(filename, 'w', encoding='utf-8') as f:
+            with open(filename, "w", encoding="utf-8") as f:
                 f.write(model_str)
         else:
-            raise ValueError('format {} not in [\'utm\', \'json\', \'py\']'.format(format))
+            raise ValueError("format {} not in [\"utm\", \"json\", \"py\"]".format(format))
 
     def to_json(self,
                 start_iteration: int = 0,
@@ -590,7 +583,7 @@ class _ModelBase:
                 ctypes.c_int64(actual_len),
                 ctypes.byref(tmp_out_len),
                 ptr_string_buffer))
-        return json.loads(string_buffer.value.decode('utf-8'))
+        return json.loads(string_buffer.value.decode("utf-8"))
 
     def load_from_file(self, filename: str):
         """ Loads the model from a file. """
@@ -629,17 +622,18 @@ class _ModelBase:
             out_preds.ctypes.data_as(ctypes.POINTER(ctypes.c_double))
         ))
         if n_preds != out_num_preds.value:
-            raise ValueError("predict size does not match {:d} to {:d}".format(n_preds, out_num_preds.value))
+            raise ValueError("The size of the prediction does not match, "
+                             "from {:d} to {:d}.".format(n_preds, out_num_preds.value))
         return out_preds.reshape((data.shape[0], self.treat_num))
 
     def feature_importance(self,
-                           importance_type: str = 'split',
+                           importance_type: str = "split",
                            iteration: Optional[int] = None
                            ) -> np.ndarray:
         """ Computes the feature importance of the model. """
         if iteration is None:
             iteration = self.iters.value
-        imp_type = 0 if importance_type == 'split' else 1
+        imp_type = 0 if importance_type == "split" else 1
         result = np.empty(self.num_feature(), dtype=np.float64)
         _safe_call(_LIB.UTB_BoosterFeatureImportance(
             self.handle,
@@ -647,7 +641,7 @@ class _ModelBase:
             ctypes.c_int(imp_type),
             result.ctypes.data_as(ctypes.POINTER(ctypes.c_double))
         ))
-        if importance_type == 'split':
+        if importance_type == "split":
             return result.astype(np.int32)
         else:
             return result

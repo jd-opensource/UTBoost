@@ -257,7 +257,7 @@ class FeatureBin {
    * \brief Constructor
    * \param num_samples number of sample
    */
-  explicit FeatureBin(data_size_t num_samples): num_samples_(num_samples), data_(num_samples, 0) {}
+  explicit FeatureBin(data_size_t num_samples): data_(num_samples, 0) {}
   ~FeatureBin() {}
 
   /*!
@@ -265,7 +265,6 @@ class FeatureBin {
    * \param num_data number of sample
    */
   void inline ReSize(data_size_t num_data) {
-    num_samples_ = num_data;
     data_.resize(num_data);
   }
 
@@ -328,7 +327,9 @@ class FeatureBin {
    */
   template <bool USE_MISSING>
   data_size_t Split(uint32_t max_bin, bool default_left, uint32_t threshold,
-                    const data_size_t* data_indices, int num_data, data_size_t* lte_indices, data_size_t* gt_indices) {
+                    const data_size_t* data_indices, int num_data,
+                    data_size_t* lte_indices, data_size_t* gt_indices) {
+
     if (num_data <= 0) { return 0; }
 
     int lte_count = 0;
@@ -356,8 +357,6 @@ class FeatureBin {
   };
 
  private:
-  // number of samples
-  data_size_t num_samples_;
   // store bin data of this feature
   std::vector<bin_t> data_;
 };

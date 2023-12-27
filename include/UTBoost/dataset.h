@@ -29,7 +29,7 @@ namespace UTBoost {
 class UTBOOST_EXPORT MetaInfo {
  public:
   /*! \brief Constructor */
-  MetaInfo();
+  MetaInfo() {num_samples_ = 0; num_distinct_treat_ = 0;};
 
   /*! \brief Initialize container */
   void Init(data_size_t num_data, bool has_weight);
@@ -55,9 +55,6 @@ class UTBOOST_EXPORT MetaInfo {
   /*! \brief treatment setter */
   void SetTreatment(const treatment_t* treat, data_size_t num_data);
 
-  /*! \brief whether weight is been initialized */
-  inline bool HasWeight() const { return !weight_.empty() && static_cast<data_size_t>(weight_.size())== num_samples_; }
-
   /*! \brief Get label pointer */
   inline const label_t* GetLabel() const { return label_.data(); }
 
@@ -75,7 +72,7 @@ class UTBOOST_EXPORT MetaInfo {
 
  private:
   // number of sample
-  data_size_t num_samples_ = 0;
+  data_size_t num_samples_;
   // number of treatments
   treatment_t num_distinct_treat_;
   // label data
@@ -196,13 +193,6 @@ class UTBOOST_EXPORT Dataset {
     }
     return ret;
   }
-
-  /*!
-   * \brief Init meta
-   * \param num_data number of samples
-   * \param has_weight whether has weight meta
-   */
-  inline void InitMetaInfo(data_size_t num_data, bool has_weight) { meta_.Init(num_data, has_weight); }
 
   /*!
    * \brief Resize data container

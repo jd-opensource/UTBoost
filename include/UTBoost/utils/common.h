@@ -37,18 +37,9 @@ namespace UTBoost {
 
 #define TIMER_START(_X) auto _X##_start = std::chrono::steady_clock::now(), _X##_stop = _X##_start
 #define TIMER_STOP(_X) _X##_stop = std::chrono::steady_clock::now()
-#define TIMER_NSEC(_X)                                                                             \
-    std::chrono::duration_cast<std::chrono::nanoseconds>(_X##_stop - _X##_start).count()
-#define TIMER_USEC(_X)                                                                             \
-    std::chrono::duration_cast<std::chrono::microseconds>(_X##_stop - _X##_start).count()
-#define TIMER_MSEC(_X)                                                                             \
-    (0.000001 *                                                                                    \
-     std::chrono::duration_cast<std::chrono::nanoseconds>(_X##_stop - _X##_start).count())
 #define TIMER_SEC(_X)                                                                              \
     (0.000001 *                                                                                    \
      std::chrono::duration_cast<std::chrono::microseconds>(_X##_stop - _X##_start).count())
-#define TIMER_MIN(_X)                                                                              \
-    std::chrono::duration_cast<std::chrono::minutes>(_X##_stop - _X##_start).count()
 
 inline static std::vector<std::string> Compact(const std::vector<std::string> &tokens){
   std::vector<std::string> compacted;
@@ -131,31 +122,6 @@ inline static std::string Join(const std::vector<T>& strs, const char* delimiter
   return str_buf.str();
 }
 
-inline static std::string Trim(const std::string &str){
-
-  std::string blank = "\r\n\t ";
-  size_t begin = str.size(), end = 0;
-  for (size_t i=0; i<str.size(); ++i) {
-    if ( blank.find(str[i]) == std::string::npos) {
-      begin = i;
-      break;
-    }
-  }
-
-  for (size_t i=str.size(); i>0; --i) {
-    if ( blank.find(str[i-1]) == std::string::npos) {
-      end = i-1;
-      break;
-    }
-  }
-
-  if (begin >= end) {
-    return "";
-  } else {
-    return str.substr(begin, end-begin+1);
-  }
-}
-
 inline static std::string Repeat(const std::string &str, unsigned int times){
   std::stringstream ss;
   for(unsigned int i=0; i<times; ++i) {
@@ -176,26 +142,6 @@ inline static std::string ToUpper(const std::string &str){
   std::string s(str);
   std::transform(s.begin(), s.end(), s.begin(), toupper);
   return s;
-}
-
-inline static std::string ToLower(const std::string &str){
-  std::string s(str);
-  std::transform(s.begin(), s.end(), s.begin(), tolower);
-  return s;
-}
-
-inline static std::string ReadFile(const std::string &filepath) {
-  std::ifstream ifs(filepath.c_str());
-  std::string content( (std::istreambuf_iterator<char>(ifs) ),
-                       (std::istreambuf_iterator<char>()    ) );
-  ifs.close();
-  return content;
-}
-
-inline static void WriteFile(const std::string &filepath, const std::string &content) {
-  std::ofstream ofs(filepath.c_str());
-  ofs << content;
-  ofs.close();
 }
 
 template <typename T>
@@ -371,30 +317,6 @@ inline static float AvoidInf(float x) {
   } else {
     return x;
   }
-}
-
-inline static std::vector<std::string> SplitBrackets(const char* c_str, char left_delimiter, char right_delimiter) {
-  std::vector<std::string> ret;
-  std::string str(c_str);
-  size_t i = 0;
-  size_t pos = 0;
-  bool open = false;
-  while (pos < str.length()) {
-    if (str[pos] == left_delimiter) {
-      open = true;
-      ++pos;
-      i = pos;
-    } else if (str[pos] == right_delimiter && open) {
-      if (i < pos) {
-        ret.push_back(str.substr(i, pos - i));
-      }
-      open = false;
-      ++pos;
-    } else {
-      ++pos;
-    }
-  }
-  return ret;
 }
 
 template<typename T>

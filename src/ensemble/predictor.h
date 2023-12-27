@@ -16,9 +16,7 @@
 #include <cstdio>
 #include <cstring>
 #include <functional>
-#include <map>
 #include <memory>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -27,7 +25,7 @@ namespace UTBoost {
 /*!
  * \brief Used to predict data with input model
  */
-class UTBOOST_EXPORT Predictor {
+class Predictor {
  public:
   /*!
    * \brief Constructor
@@ -80,16 +78,6 @@ class UTBOOST_EXPORT Predictor {
         }
       }
     }
-  }
-
-  std::unordered_map<int, double> CopyToPredictMap(const std::vector<std::pair<int, double>>& features) {
-    std::unordered_map<int, double> buf;
-    for (const auto &feature : features) {
-      if (feature.first < num_feature_) {
-        buf[feature.first] = feature.second;
-      }
-    }
-    return buf;
   }
 
   /*! \brief Boosting model */

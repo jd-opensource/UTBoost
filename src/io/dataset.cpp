@@ -9,11 +9,6 @@
 
 namespace UTBoost {
 
-MetaInfo::MetaInfo() {
-  num_distinct_treat_ = 0;
-  num_samples_ = 0;
-}
-
 void MetaInfo::SetLabel(const label_t *label, data_size_t num_data) {
   ASSERT_NOTNULL(label)
   if (num_samples_ == 0) {
@@ -109,15 +104,16 @@ void MetaInfo::Init(const MetaInfo &fullset, const data_size_t *used_indices, da
 void Dataset::Build(std::vector<std::unique_ptr<BinMapper>> &bin_mappers, data_size_t num_row) {
   num_total_bins = 0;
   num_features_ = static_cast<int>(bin_mappers.size());
-  std::vector<int> used_features;
+  bin_data_.reserve(num_features_);
+  mappers_.reserve(num_features_);
+
   for (auto & bin_mapper : bin_mappers) {
-    mappers_.emplace_back(bin_mapper.release());  // transfer ownership
+    mappers_.push_back(std::unique_ptr<BinMapper>(bin_mapper.release()));  // transfer ownership
     num_total_bins += mappers_.back()->GetNumBin();
   }
+
   for (int i = 0; i < num_features_; ++i) {
-    bin_data_.emplace_back(
-        std::unique_ptr<FeatureBin>(new FeatureBin(num_row))
-        );
+    bin_data_.push_back(std::unique_ptr<FeatureBin>(new FeatureBin(num_row)));
   }
   num_samples_ = num_row;
 }

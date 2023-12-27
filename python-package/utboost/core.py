@@ -1,35 +1,34 @@
+# -*- coding:utf-8 -*-
 import numpy as np
 
 from typing import Dict, Any, List, Optional, Union, Tuple
 
 from .basic import Dataset, _ModelBase, Logger, TrainingStopException
 from .callback import AbstractCallback, EvalCallback, EarlyStopCallback, _EvalLogsType
+from .validation import check_binary, check_consistent_length, check_incremental_group
 
 
 def _auto_objective(obj: str, csplit: str) -> str:
     if csplit in ("ed", "kl", "chi", "ddp"):
         if obj != "default":
-            Logger.warn("criterion {} compatible with default objective only, {} does not work".format(csplit, obj))
+            Logger.warn("The criterion {} is only compatible with the default objective. "
+                        "{} does not work.".format(csplit, obj))
         return "default"
     elif csplit == "gbm":
         if obj not in ("logloss", "mse"):
-            raise ValueError("criterion gbm compatible with logloss and mse, however, {} is provided".format(obj))
+            raise ValueError("The criterion gbm is compatible with both logloss and mse. "
+                             "However, {} is provided.".format(obj))
         return obj
     else:
         raise ValueError("Unknown split criterion {}".format(csplit))
-
-
-def _check_binary(x: np.ndarray) -> bool:
-    _set = set(x.flatten().astype(np.int32))
-    return (min(_set) == 0) and (max(_set) == 1) and (len(_set) == 2)
 
 
 class UTBoostModel:
 
     def __init__(
             self,
-            ensemble_type: str = 'boosting',
-            criterion: str = 'gbm',
+            ensemble_type: str = "boosting",
+            criterion: str = "gbm",
             num_leaves: int = 31,
             max_depth: int = 5,
             learning_rate: float = 0.1,
@@ -41,7 +40,7 @@ class UTBoostModel:
             init_from_average: bool = False,
             min_data_leaf: int = 20,
             max_bin: int = 256,
-            gbm_gain_type: str = 'global',
+            gbm_gain_type: str = "global",
             scale_treat_weights: Optional[List[float]] = None,
             effect_constrains: Optional[List[int]] = None,
             auto_balance: bool = False,
@@ -59,15 +58,15 @@ class UTBoostModel:
 
         Parameters
         ----------
-        ensemble_type : str, optional (default='boosting')
-            Ensemble method of trees. Choose from one of the types: 'boosting', 'bagging'.
-        criterion : str, optional (default='gbm')
+        ensemble_type : str, optional (default="boosting")
+            Ensemble method of trees. Choose from one of the types: "boosting", "bagging".
+        criterion : str, optional (default="gbm")
             Evaluation criterion to find optimal split point.
-            'gbm', Gradient Boosting Decision Tree.
-            'ddp', The difference of uplift between two leaves.
-            'ed', Euclidean Distance.
-            'kl', KL Divergence.
-            'chi', Chi-Square statistic.
+            "gbm", Gradient Boosting Decision Tree.
+            "ddp", The difference of uplift between two leaves.
+            "ed", Euclidean Distance.
+            "kl", KL Divergence.
+            "chi", Chi-Square statistic.
         num_leaves : int, optional (default=31)
             The maximum number of leaves.
         max_depth : int, optional (default=5)
@@ -90,13 +89,13 @@ class UTBoostModel:
             The minimum number of samples required to be split at a leaf node.
         max_bin : int, optional (default=255)
             The maximum number of bins per feature.
-        gbm_gain_type : str, optional (default='global')
+        gbm_gain_type : str, optional (default="global")
             How gain is computed in the gbm algorithm, Choose one from:
-            'global', Gain is computed from the full instance.
-            'local', Gain is computed from the treated instance.
-            'tau', Gain is computed from the ite-related parts.
+            "global", Gain is computed from the full instance.
+            "local", Gain is computed from the treated instance.
+            "tau", Gain is computed from the ite-related parts.
         scale_treat_weights : list of float, optional (default=None)
-            Weights associated with control and each treated group. Works only when criterion='gbm'.
+            Weights associated with control and each treated group. Works only when criterion="gbm".
             If None, all instances are supposed to have weight one.
         effect_constrains : list of int, optional (default=None)
             Impose monotonic constraints on causal effects.
@@ -118,11 +117,11 @@ class UTBoostModel:
         eval_metric : list of strings, optional (default=None)
             Metrics used for early stop (if enabled) and best model selection (if enabled).
             It should be a built-in evaluation metric as follows:
-            'logloss', Applicable to binary outcome.
-            'auc', Applicable to binary outcome.
-            'rmse', Applicable to continuous outcome.
-            'qini_coff', Normalized qini area, applicable to binary outcome.
-            'qini_area', Applicable to continuous & binary outcome.
+            "logloss", Applicable to binary outcome.
+            "auc", Applicable to binary outcome.
+            "rmse", Applicable to continuous outcome.
+            "qini_coff", Normalized qini area, applicable to binary outcome.
+            "qini_area", Applicable to continuous & binary outcome.
         early_stopping_rounds : int, optional (default=-1)
             Validation metric needs to improve at least once in every **early_stopping_rounds** round(s) to continue training.
             This parameter only takes effect when the value is greater than 0 and at least one metric is provided.
@@ -187,159 +186,152 @@ class UTBoostModel:
 
     def _process_params(self):
         # ensemble
-        supported = ('boosting', "bagging")
+        supported = ("boosting", "bagging")
         if self.ensemble_type in supported:
-            self._params['ensemble'] = "boost" if self.ensemble_type == 'boosting' else 'rf'
+            self._params["ensemble"] = "boost" if self.ensemble_type == "boosting" else "rf"
         else:
             raise ValueError(
-                "ensemble_type compatible with {}, however, {} is provided".format(supported, self.ensemble_type))
+                "The ensemble_type compatible with {}, however, {} is provided.".format(supported, self.ensemble_type))
 
         # criterion
-        self._params['split_criteria'] = self.criterion
+        self._params["split_criteria"] = self.criterion
 
         # max_depth, num_leaves
         if self.max_depth > 0:
             max_num_leaves = pow(2, self.max_depth)
             if max_num_leaves < self.num_leaves:
                 self.num_leaves = max_num_leaves
-        self._params['max_depth'] = self.max_depth
-        self._params['num_leaves'] = self.num_leaves
+        self._params["max_depth"] = self.max_depth
+        self._params["num_leaves"] = self.num_leaves
 
         # learning_rate
         if (self.learning_rate > 0) and (self.learning_rate <= 1.0):
-            self._params['learning_rate'] = self.learning_rate
+            self._params["learning_rate"] = self.learning_rate
         else:
-            raise ValueError("learning_rate should be in the interval of 0 to 1")
+            raise ValueError("The value of learning_rate should be in the range 0 to 1.")
 
         # subsample
         if (self.subsample > 0) and (self.subsample <= 1.0):
-            self._params['bagging_fraction'] = self.subsample
-            self._params['bagging_freq'] = self.subsample_freq
+            self._params["bagging_fraction"] = self.subsample
+            self._params["bagging_freq"] = self.subsample_freq
             if self.subsample < 1.0 and self.subsample_freq < 1:
-                Logger.warn('Since subsample_freq is less than 1, subsample does not work')
+                Logger.warn("Since subsample_freq is less than 1, subsample does not work")
         else:
-            raise ValueError("subsample should be in the interval of 0 to 1")
+            raise ValueError("The value of subsample should be in the range 0 to 1.")
 
         # colsample
         if (self.colsample > 0) and (self.colsample <= 1.0):
-            self._params['feature_fraction'] = self.colsample
+            self._params["feature_fraction"] = self.colsample
         else:
-            raise ValueError("colsample should be in the interval of 0 to 1")
+            raise ValueError("The value of colsample should be in the range 0 to 1.")
 
         # use_honesty
-        self._params['use_honesty'] = int(self.use_honesty)
+        self._params["use_honesty"] = int(self.use_honesty)
         # init_from_average
-        self._params['boost_from_average'] = int(self.init_from_average)
+        self._params["boost_from_average"] = int(self.init_from_average)
 
         # max_bin
         if self.max_bin > 2:
-            self._params['max_bin'] = self.max_bin
+            self._params["max_bin"] = self.max_bin
         else:
-            raise ValueError("max_bin should be greater than 2")
+            raise ValueError("Ensure that the value of max_bin is greater than 2.")
 
         # min_data_leaf
         if self.min_data_leaf > 0:
-            self._params['min_data_leaf'] = self.min_data_leaf
+            self._params["min_data_leaf"] = self.min_data_leaf
         else:
-            raise ValueError("max_bin should be greater than 0")
+            raise ValueError("Ensure that the value of max_bin is greater than zero.")
 
         # subsample_for_binmapper
         if self.subsample_for_binmapper > 10000:
-            self._params['bin_construct_sample_cnt'] = self.subsample_for_binmapper
+            self._params["bin_construct_sample_cnt"] = self.subsample_for_binmapper
         else:
-            raise ValueError("subsample_for_binmapper should be greater than 10000")
+            raise ValueError("The value of subsample_for_binmapper must be greater than 10000.")
         # seed
-        self._params['seed'] = self.seed
-        self._params['bagging_seed'] = self.seed + 1
-        self._params['feature_fraction_seed'] = self.seed + 2
+        self._params["seed"] = self.seed
+        self._params["bagging_seed"] = self.seed + 1
+        self._params["feature_fraction_seed"] = self.seed + 2
         # n_threads
-        self._params['num_threads'] = self.n_threads
+        self._params["num_threads"] = self.n_threads
 
         if self.eval_metric is not None:
-            self._params['metric'] = self.eval_metric
+            self._params["metric"] = self.eval_metric
 
         # conflict check
-        if (self.criterion in ("ed", "kl", "chi")) and (self.ensemble_type != 'bagging'):
-            raise ValueError("criterion {} is not available when ensemble_type=boosting".format(self.criterion))
+        if (self.criterion in ("ed", "kl", "chi")) and (self.ensemble_type != "bagging"):
+            raise ValueError("The criterion ({}) is unavailable when the ensemble_type "
+                             "is set to boosting.".format(self.criterion))
 
-        if self.ensemble_type == 'bagging':
+        if self.ensemble_type == "bagging":
             if not ((self.subsample_freq > 0 and 0.0 < self.subsample < 1.0) or (0.0 < self.colsample < 1.0)):
-                raise ValueError("When ensemble_type=bagging, at least one of subsample and colsample should be in the (0,"
-                                 "1) interval")
+                raise ValueError("When using ensemble_type=bagging, ensure that "
+                                 "either subsample or colsample (or both) are set to a value between 0 and 1.")
 
         if self.use_honesty and self.subsample > 0.9 and self.subsample_freq < 1:
-            raise ValueError("Set use_honesty=True requires subsample less than 0.9 and subsample_freq greater than 0")
+            raise ValueError("To set use_honesty=True, "
+                             "the subsample must be less than 0.9 and the subsample_freq must be greater than 0.")
 
         if self.scale_treat_weights is not None:
             for weight in self.scale_treat_weights:
                 if weight < 0.0:
-                    raise ValueError("scale_treat_weights should greater than 0.")
-            self._params['scale_treat_weights'] = ','.join([str(i) for i in self.scale_treat_weights])
-            if self.criterion != 'gbm':
-                Logger.warn('scale_treat_weights is not available when criterion != gbm')
+                    raise ValueError("The value of scale_treat_weights must be greater than 0.")
+            self._params["scale_treat_weights"] = ",".join([str(i) for i in self.scale_treat_weights])
+            if self.criterion != "gbm":
+                Logger.warn("scale_treat_weights is not available when criterion != gbm")
 
         if self.effect_constrains is not None:
             for weight in self.effect_constrains:
                 if weight not in (-1, 0, 1):
-                    raise ValueError("effect_constrains should in (-1, 0, 1).")
-            self._params['effect_constrains'] = ','.join([str(i) for i in self.effect_constrains])
+                    raise ValueError("The effect_constrains should be limited to the values of -1, 0, or 1.")
+            self._params["effect_constrains"] = ",".join([str(i) for i in self.effect_constrains])
 
-        if self.gbm_gain_type == 'global':
-            self._params['gbm_gain_type'] = 0
-        elif self.gbm_gain_type == 'local':
-            self._params['gbm_gain_type'] = 1
-        elif self.gbm_gain_type == 'tau':
-            self._params['gbm_gain_type'] = 2
+        if self.gbm_gain_type == "global":
+            self._params["gbm_gain_type"] = 0
+        elif self.gbm_gain_type == "local":
+            self._params["gbm_gain_type"] = 1
+        elif self.gbm_gain_type == "tau":
+            self._params["gbm_gain_type"] = 2
         else:
-            raise ValueError("gbm_gain_type should be in {global, local, tau}")
+            raise ValueError("The possible values for gbm_gain_type are `global`, `local`, and `tau`.")
 
     def _check_data(
             self,
             X: Union[np.ndarray],
-            T: Optional[np.ndarray] = None,
+            ti: Optional[np.ndarray] = None,
             y: Optional[np.ndarray] = None
     ):
         """ Check if the data meets the training requirements. """
-        if (T is None) or (y is None):
-            raise ValueError('treatment or label is None type')
+        if (ti is None) or (y is None):
+            raise ValueError("The input treatment or label is None.")
 
         if X.shape[0] < 10:
-            raise ValueError('Modeling sample number less than 10')
+            raise ValueError("Sample size less than 10.")
 
-        if X.shape[0] != T.flatten().shape[0]:
-            raise ValueError(
-                'treatment size {} and feature size {} are not equal'.format(T.flatten().shape[0], X.shape[0]))
-
-        if X.shape[0] != y.flatten().shape[0]:
-            raise ValueError('label size {} and feature size {} are not equal'.format(T.flatten().shape[0], X.shape[0]))
-
-        t_set = set(T.flatten().astype(np.int32))
-        if min(t_set) != 0:
-            raise ValueError('treatment should start from 0, but currently it is {}'.format(min(t_set)))
-
-        if max(t_set) != len(t_set) - 1:
-            raise ValueError('treatment should start from 0 and be assigned sequentially')
+        check_consistent_length(X, ti, y)
+        # check treatment indicator
+        t_set = check_incremental_group(ti)
 
         if len(t_set) == 1:
-            Logger.warn('With only a single treatment, the model cannot learn causal effects')
+            Logger.warn("The model is not capable of learning causal effects with only one treatment indicator.")
 
-        y_set = set(y.flatten())
-        if len(y_set) < 2:
-            raise ValueError('All labels have the same value, the model cannot learn')
+        uniques = np.unique(y)
+        if len(uniques) < 2:
+            raise ValueError("All labels have identical values.")
 
         if self.effect_constrains is not None:
             if len(self.effect_constrains) != len(t_set) - 1:
-                raise ValueError('effect_constrains size ({:d}) is not equal to the number of '
-                                 'treated group ({:d}).'.format(len(self.effect_constrains), len(t_set) - 1))
+                raise ValueError("The size of the effect_constraints ({:d}) "
+                                 "does not match the number of the treated group "
+                                 "({:d})".format(len(self.effect_constrains), len(t_set) - 1))
 
     def fit(
             self,
             X: Union[np.ndarray, Dataset],
-            T: Optional[np.ndarray] = None,
+            ti: Optional[np.ndarray] = None,
             y: Optional[np.ndarray] = None,
             eval_sets: Optional[List[Tuple[np.ndarray, np.ndarray, np.ndarray]]] = None,
             feature_names: Optional[List[str]] = None
-    ) -> 'UTBoostModel':
+    ) -> "UTBoostModel":
         """
         Fit the model according to the given training data.
 
@@ -347,8 +339,8 @@ class UTBoostModel:
         ----------
         X : array-like matrix of shape = [n_samples, n_features] or Dataset
             Input feature matrix.
-        T : array-like of shape = [n_samples], optional
-            The treatment variables for the training dataset.
+        ti : array-like of shape = [n_samples], optional
+            The treatment indicators for the training dataset.
         y : array-like of shape = [n_samples], optional
             The target variables for the training dataset.
         eval_sets : list or None, optional (default=None)
@@ -361,19 +353,21 @@ class UTBoostModel:
             Returns self.
         """
         if isinstance(X, np.ndarray):
-            self._check_data(X, T, y)
-            train = Dataset(data=X, label=y, treatment=T)
+            self._check_data(X, ti, y)
+            train = Dataset(data=X, label=y, treatment=ti)
         elif isinstance(X, Dataset):
             train = X
         else:
-            raise ValueError("X should be ndarray or Dataset")
+            raise ValueError("Input X should be either ndarray or dataset.")
 
         evals = []
         if eval_sets is not None:
             for eval_x, eval_t, eval_y in eval_sets:
                 evals.append(Dataset(data=eval_x, label=eval_y, treatment=eval_t, reference=train))
 
-        self._feature_names = feature_names
+        if feature_names:
+            assert len(feature_names) == X.shape[1], "Input feature names with inconsistent numbers of features."
+            self._feature_names = feature_names
 
         cbs: List[AbstractCallback] = []
         if (self.eval_metric is not None) and (self.eval_period > 0):
@@ -381,7 +375,7 @@ class UTBoostModel:
                 EvalCallback(eval_period=self.eval_period)
             )
             if self.early_stopping_rounds > 0:
-                best_data_name = 'train' if len(evals) == 0 else 'valid-0'
+                best_data_name = "train" if len(evals) == 0 else "valid-0"
                 cbs.append(
                     EarlyStopCallback(stop_round=self.early_stopping_rounds,
                                       data_name=best_data_name, metric_name=self.eval_metric[0],
@@ -432,17 +426,17 @@ class UTBoostModel:
         if self._model is not None:
             return self._model.predict(X)
         else:
-            raise Exception('model should be fitted or loaded from file first')
+            raise Exception("The model must be fitted or loaded from a file before proceeding.")
 
-    def feature_importance(self, importance_type: str = 'split') -> List[Tuple[str, Any]]:
+    def feature_importance(self, importance_type: str = "split") -> List[Tuple[str, Any]]:
         """
         Get features importance from the fitted trees.
 
         Parameters
         ----------
-        importance_type : string, optional (default='split')
-            If 'split', result is the total times the feature is used in model.
-            If 'gain', result is the total gain the feature is used in model.
+        importance_type : string, optional (default="split")
+            If "split", result is the total times the feature is used in model.
+            If "gain", result is the total gain the feature is used in model.
         Returns
         -------
         features_importance : list of tuples = [(feature_name, importance), ...]
@@ -450,17 +444,17 @@ class UTBoostModel:
         """
         if self._model is not None:
             imp = self._model.feature_importance(importance_type)
-            feature_names = ['f' + str(i) for i in
+            feature_names = ["f" + str(i) for i in
                              range(imp.shape[0])] if self._feature_names is None else self._feature_names
             ret = []
-            for index, name in feature_names:
+            for index, name in enumerate(feature_names):
                 ret.append((name, imp[index]))
             ret.sort(key=lambda x: x[1], reverse=True)
             return ret
         else:
-            raise Exception('model should be fitted first')
+            raise Exception("The model should be fitted first.")
 
-    def load_model(self, model_path) -> 'UTBoostModel':
+    def load_model(self, model_path) -> "UTBoostModel":
         """
         Load and initialize the model from file
 
@@ -476,7 +470,7 @@ class UTBoostModel:
         self._model = _ModelBase(model_file=model_path)
         return self
 
-    def save_model(self, model_path) -> 'UTBoostModel':
+    def save_model(self, model_path) -> "UTBoostModel":
         """
         Save the model to file.
 
@@ -490,12 +484,12 @@ class UTBoostModel:
             Returns self.
         """
         if self._model is not None:
-            self._model.save(model_path, format='utm')
+            self._model.save(model_path, format="utm")
         else:
-            raise Exception('model should be fitted first')
+            raise Exception("The model should be fitted first.")
         return self
 
-    def to_json(self, json_file) -> 'UTBoostModel':
+    def to_json(self, json_file) -> "UTBoostModel":
         """
         Dump the model to json format.
 
@@ -509,12 +503,12 @@ class UTBoostModel:
             Returns self.
         """
         if self._model is not None:
-            self._model.save(json_file, format='json')
+            self._model.save(json_file, format="json")
         else:
-            raise Exception('model should be fitted first')
+            raise Exception("The model should be fitted first.")
         return self
 
-    def to_python(self, python_file) -> 'UTBoostModel':
+    def to_python(self, python_file) -> "UTBoostModel":
         """
         Export the model to python code.
 
@@ -528,44 +522,55 @@ class UTBoostModel:
             Returns self.
         """
         if self._model is not None:
-            self._model.save(python_file, format='py')
+            self._model.save(python_file, format="py")
         else:
-            raise Exception('model should be fitted first')
+            raise Exception("The model should be fitted first.")
         return self
+
+    def get_logs(self) -> _EvalLogsType:
+        """ Get history training logs """
+        return self._eval_logs.copy()
+
+    @property
+    def n_iters(self) -> int:
+        """ number of rounds """
+        return self._model.iters.value
 
 
 class UTBClassifier(UTBoostModel):
 
     def _process_params(self):
         super()._process_params()
-        available = ('qini_area', 'qini_coff', 'logloss', 'auc')
-        if 'metric' in self._params.keys():
-            for metric in self._params['metric']:
+        available = ("qini_area", "qini_coff", "logloss", "auc")
+        if "metric" in self._params.keys():
+            for metric in self._params["metric"]:
                 if metric not in available:
                     raise ValueError(
-                        'Metric {} is not working in classifier, only {} are available.'.format(metric, available))
+                        "Only {} is available for the regressor. "
+                        "The metric {} does not work.".format(available, metric))
 
-        if (self.criterion in ("ed", "kl", "chi")) and (self.ensemble_type != 'bagging'):
-            raise ValueError("criterion {} is not available when ensemble_type=boosting".format(self.criterion))
+        if (self.criterion in ("ed", "kl", "chi")) and (self.ensemble_type != "bagging"):
+            raise ValueError("The criterion {} is unavailable when the ensemble_type "
+                             "is set to bagging.".format(self.criterion))
 
-        if self.criterion in ("ed", "kl", "chi", 'ddp'):
-            self._params['objective'] = 'default'
-        elif self.criterion == 'gbm':
-            self._params['objective'] = 'logloss'
+        if self.criterion in ("ed", "kl", "chi", "ddp"):
+            self._params["objective"] = "default"
+        elif self.criterion == "gbm":
+            self._params["objective"] = "logloss"
         else:
-            raise ValueError("criterion {} not in (\"ed\", \"kl\", \"chi\", \"ddp\", \"gbm\")".format(self.criterion))
+            raise ValueError("The criterion ({}) is not included in the following list: "
+                             "\"ed\", \"kl\", \"chi\", \"ddp\", or \"gbm\".".format(self.criterion))
 
-        self._params['auto_balance'] = int(self.auto_balance)
+        self._params["auto_balance"] = int(self.auto_balance)
 
     def _check_data(
             self,
             X: Union[np.ndarray],
-            T: Optional[np.ndarray] = None,
+            ti: Optional[np.ndarray] = None,
             y: Optional[np.ndarray] = None
     ):
-        super()._check_data(X, T, y)
-        if not _check_binary(y):
-            raise ValueError('Label should in {0, 1}')
+        super()._check_data(X, ti, y)
+        check_binary(y)
 
 
 class UTBRegressor(UTBoostModel):
@@ -573,19 +578,22 @@ class UTBRegressor(UTBoostModel):
 
     def _process_params(self):
         super()._process_params()
-        available = ('qini_area', 'rmse', 'l2')
-        if 'metric' in self._params.keys():
-            for metric in self._params['metric']:
+        available = ("qini_area", "rmse", "l2")
+        if "metric" in self._params.keys():
+            for metric in self._params["metric"]:
                 if metric not in available:
                     raise ValueError(
-                        'Metric {} is not working in regressor, only {} are available.'.format(metric, available))
+                        "Only {} is available for the regressor. "
+                        "The metric {} does not work.".format(available, metric))
 
-        if (self.criterion in ("ed", "kl", "chi")) and (self.ensemble_type != 'bagging'):
-            raise ValueError("criterion {} is not available when ensemble_type=boosting".format(self.criterion))
+        if (self.criterion in ("ed", "kl", "chi")) and (self.ensemble_type != "bagging"):
+            raise ValueError("The criterion {} is unavailable when the ensemble_type "
+                             "is set to boosting.".format(self.criterion))
 
-        if self.criterion in ("ed", "chi", 'ddp'):
-            self._params['objective'] = 'default'
-        elif self.criterion == 'gbm':
-            self._params['objective'] = 'mse'
+        if self.criterion in ("ed", "chi", "ddp"):
+            self._params["objective"] = "default"
+        elif self.criterion == "gbm":
+            self._params["objective"] = "mse"
         else:
-            raise ValueError("criterion {} not in (\"ed\", \"chi\", \"ddp\", \"gbm\")".format(self.criterion))
+            raise ValueError("The criterion ({}) is not included in the following list: "
+                             "\"ed\", \"chi\", \"ddp\", or \"gbm\".".format(self.criterion))
