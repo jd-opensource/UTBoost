@@ -315,7 +315,7 @@ class Parser {
   void copyTo(T* out_feature, int max_feature_idx, label_t* out_label, treatment_t* out_treat) {
     OMP_INIT_EX();
     #pragma omp parallel for schedule(static)
-    for (size_t i = 0; i < num_samples_; ++i) {
+    for (long i = 0; i < num_samples_; ++i) {
       OMP_LOOP_EX_BEGIN();
       T* f = out_feature + i * max_feature_idx;
       for (std::pair<int, double> p : features_[i]) {
