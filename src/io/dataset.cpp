@@ -113,7 +113,9 @@ void Dataset::Build(std::vector<std::unique_ptr<BinMapper>> &bin_mappers, data_s
   }
 
   for (int i = 0; i < num_features_; ++i) {
-    bin_data_.push_back(std::unique_ptr<FeatureBin>(new FeatureBin(num_row)));
+    bin_data_.push_back(std::unique_ptr<FeatureBin>(
+        new FeatureBin(num_row, mappers_[i]->most_freq_bin()))
+        );
   }
   num_samples_ = num_row;
 }
@@ -241,7 +243,7 @@ void Dataset::CreateValid(const Dataset *dataset) {
   for (int i = 0; i < num_features_; ++i) {
     mappers_.emplace_back(new BinMapper(*(dataset->mappers_[i])));
     bin_data_.emplace_back(
-        std::unique_ptr<FeatureBin>(new FeatureBin(num_samples_))
+        std::unique_ptr<FeatureBin>(new FeatureBin(num_samples_, mappers_[i]->most_freq_bin()))
     );
   }
 }
@@ -293,24 +295,16 @@ void Dataset::DumpBinMapper(const char* text_filename) {
   writer->Write(s.c_str(), s.size());
 }
 
-void Parser::copyTo(double *out_feature, int max_feature_idx, label_t *out_label, treatment_t *out_treat) {
-  OMP_INIT_EX();
-  #pragma omp parallel for schedule(static)
-  for (int i = 0; i < num_samples_; ++i) {
-    OMP_LOOP_EX_BEGIN();
-      double* f = out_feature + i * max_feature_idx;
-      for (std::pair<int, double> p : features_[i]) {
-        *(f + p.first) = p.second;
-      }
-      *(out_label + i) = labels_[i];
-      *(out_treat + i) = treatments_[i];
-    OMP_LOOP_EX_END();
+Parser *Parser::CreateParser(const std::string &type) {
+  if (type == std::string("libsvm")) {
+    return new LibsvmParser();
   }
-  OMP_THROW_EX();
+  Log::Error("Unknown file type in CreateParser");
+  return nullptr;
 }
 
 void LibsvmParser::parseFile(const char *filename, int label_idx, int treatment_idx, bool skip_first_line) {
-  TextReader<size_t> model_reader(filename, skip_first_line);
+  TextReader<size_t> reader(filename, skip_first_line);
   std::function<void(size_t, const std::vector<std::string>&)>
     process_fun = [&label_idx, &treatment_idx, this](
     data_size_t, const std::vector<std::string>& lines) {
@@ -356,7 +350,15 @@ void LibsvmParser::parseFile(const char *filename, int label_idx, int treatment_
     OMP_THROW_EX();
   };
 
-  model_reader.ReadAllAndProcessParallel(process_fun);
+  reader.ReadAllAndProcessParallel(process_fun);
+
+  for (auto & feature : features_) {
+    if (feature.empty())
+      continue;
+    if (feature.back().first + 1 > num_cols_)
+      num_cols_ = feature.back().first + 1;
+  }
+
   num_samples_ = static_cast<int>(features_.size());
 }
 

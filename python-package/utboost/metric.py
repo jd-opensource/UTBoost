@@ -7,7 +7,7 @@ from numpy import ndarray
 from pandas import DataFrame
 from typing import Tuple, Union
 
-from .validation import check_binary, check_consistent_length, is_numpy_2d_array
+from .validation import check_binary, check_consistent_length, check_numpy_nd_array
 
 
 def make_uplift_curve(
@@ -158,8 +158,7 @@ def _multi_treatment_to_binary(actual_outcome: ndarray,
         check_binary(treatment_flag)
         return actual_outcome, uplift_score, treatment_flag
     except ValueError:
-        if not is_numpy_2d_array(uplift_score):
-            raise ValueError("Input score should be presented as a two-dimensional array.")
+        check_numpy_nd_array(uplift_score, 2)
 
         treatment_flag = treatment_flag.astype(np.int32).flatten()
         if uplift_score.shape[1] != np.max(treatment_flag):

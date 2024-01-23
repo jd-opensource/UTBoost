@@ -97,7 +97,7 @@ class UTBOOST_EXPORT Dataset {
    * \brief Constructor
    * \param n number of samples
    */
-  Dataset(data_size_t n) { num_samples_ = n; };
+  Dataset(data_size_t n) { num_samples_ = n;};
 
   /*! \brief Default Destructor */
   ~Dataset() = default;
@@ -150,7 +150,6 @@ class UTBOOST_EXPORT Dataset {
    */
   inline void PushValue(int feature_idx, data_size_t row_idx, double value) {
     bin_t bin = mappers_[feature_idx]->GetBinIndex(value);
-    if (bin == 0) { return; }  // Initially, all datas are in bin0
     bin_data_[feature_idx]->InsertValue(row_idx, bin);
   }
 
@@ -291,7 +290,10 @@ class Parser {
   /*!
    * \brief Constructor that initializes the member variable num_samples_ to 0.
    */
-  Parser() { num_samples_ = 0; }
+  Parser() {
+    num_samples_ = 0;
+    num_cols_ = 0;
+  }
 
   /*!
    * \brief Parses the given file and stores the parsing results in the internal member variables.
@@ -309,7 +311,30 @@ class Parser {
    * \param out_label The output array for labels.
    * \param out_treat The output array for treatments.
    */
-  void copyTo(double* out_feature, int max_feature_idx, label_t* out_label, treatment_t* out_treat);
+  template<typename T>
+  void copyTo(T* out_feature, int max_feature_idx, label_t* out_label, treatment_t* out_treat) {
+    OMP_INIT_EX();
+    #pragma omp parallel for schedule(static)
+    for (size_t i = 0; i < num_samples_; ++i) {
+      OMP_LOOP_EX_BEGIN();
+      T* f = out_feature + i * max_feature_idx;
+      for (std::pair<int, double> p : features_[i]) {
+        *(f + p.first) = static_cast<T>(p.second);
+      }
+      *(out_label + i) = labels_[i];
+      *(out_treat + i) = treatments_[i];
+      OMP_LOOP_EX_END();
+    }
+    OMP_THROW_EX();
+  }
+
+  const std::vector<std::pair<int, double>>& row_features(int idx) { return features_[idx]; }
+
+  const label_t* labels() { return labels_.data(); }
+
+  const treatment_t* treatments() { return treatments_.data(); }
+
+  static Parser* CreateParser(const std::string& type);
 
   /*!
    * \brief Gets the number of samples.
@@ -317,9 +342,13 @@ class Parser {
    */
   data_size_t num_samples() { return num_samples_; }
 
+  int num_cols() { return num_cols_; }
+
  protected:
   // The number of samples.
   data_size_t num_samples_;
+  // The number of columns.
+  int num_cols_;
   // The feature vectors.
   std::vector<std::vector<std::pair<int, double>>> features_;
   // The label vectors.

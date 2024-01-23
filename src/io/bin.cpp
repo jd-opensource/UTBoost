@@ -20,12 +20,15 @@ BinMapper::BinMapper(const BinMapper& other) {
   is_trivial_ = other.is_trivial_;
   use_missing_ = other.use_missing_;
   boundaries_ = other.boundaries_;
+  na_bin_ = other.na_bin_;
+  most_freq_bin_ = other.most_freq_bin_;
 }
 
 std::vector<double> GreedyFindBoundary(const double* distinct_values, const int* counts, int num_distinct_values,
-                                       int max_bin, int total_cnt, int min_data_in_bin) {
+                                       int max_bin, int total_cnt, int min_data_in_bin, std::vector<int> & cnt_in_bin) {
 
   std::vector<double> bin_upper_bound;
+  cnt_in_bin.clear();
 
   if (num_distinct_values <= max_bin) {
     bin_upper_bound.clear();
@@ -36,6 +39,7 @@ std::vector<double> GreedyFindBoundary(const double* distinct_values, const int*
         auto val = std::nextafter(((distinct_values[i] + distinct_values[i + 1]) / 2.0), INFINITY);
         if (bin_upper_bound.empty() || val > std::nextafter(bin_upper_bound.back(), INFINITY)) {
           bin_upper_bound.push_back(val);
+          cnt_in_bin.push_back(cur_cnt_inbin);
           cur_cnt_inbin = 0;
         }
       }
@@ -72,12 +76,18 @@ std::vector<double> GreedyFindBoundary(const double* distinct_values, const int*
       }
       cur_cnt_inbin += counts[i];
       if (is_big_count_value[i] || cur_cnt_inbin >= mean_bin_size ||
-          (is_big_count_value[i+1] && cur_cnt_inbin >= std::max(1.0 , mean_bin_size*0.5f))) {
+          (is_big_count_value[i + 1] && cur_cnt_inbin >= std::max(1.0 , mean_bin_size * 0.5f))) {
         upper_bounds[bin_cnt] = distinct_values[i];
+
+        cnt_in_bin.push_back(cur_cnt_inbin);
+
         ++bin_cnt;
         lower_bounds[bin_cnt] = distinct_values[i + 1];
 
-        if (bin_cnt >= max_bin - 1) { break; }
+        if (bin_cnt >= max_bin - 1) {  // last bin
+          cnt_in_bin.push_back(rest_sample_cnt);
+          break;
+        }
         cur_cnt_inbin = 0;
 
         if (!is_big_count_value[i]) {
@@ -137,20 +147,33 @@ void BinMapper::FindBoundary(double* values, data_size_t num_row, int max_bin, i
 
   if (use_missing_) {
     boundaries_ = GreedyFindBoundary(distinct_values.data(), counts.data(), num_distinct_values,
-                                     max_bin - 1, num_row - na_cnt, min_data_bin);
+                                     max_bin - 1, num_row - na_cnt, min_data_bin, cnt_in_bin);
     boundaries_.push_back(NAN);
   } else {
     boundaries_ = GreedyFindBoundary(distinct_values.data(), counts.data(), num_distinct_values,
-                                     max_bin , num_row, min_data_bin);
+                                     max_bin , num_row, min_data_bin, cnt_in_bin);
   }
 
+
   num_bin_ = static_cast<int>(boundaries_.size());
+
+  na_bin_ = use_missing_? num_bin_ - 1 : GetBinIndex(0.0);
+
   // check trivial(num_bin_ == 1) feature
   if (num_bin_ <= 1 || (num_bin_ == 2 && normal_num_values == 0) ) {
     is_trivial_ = true;
   } else {
     is_trivial_ = false;
   }
+
+  int max_cnt = na_cnt;
+  for (int i = 0; i < cnt_in_bin.size(); ++i) {
+    if (cnt_in_bin[i] > max_cnt) {
+      max_cnt = cnt_in_bin[i];
+      most_freq_bin_ = static_cast<bin_t>(i);
+    }
+  }
+
   ASSERT_LE(boundaries_.size(), static_cast<size_t>(max_bin));
 }
 

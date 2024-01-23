@@ -6,10 +6,14 @@ import subprocess
 import logging
 from setuptools import find_packages, setup, Extension
 from setuptools.command import build_ext, sdist, install_lib
+from wheel.bdist_wheel import bdist_wheel
 
 
 CURRENT_DIR = os.path.dirname(os.path.expanduser(os.path.abspath(__file__)))
 BUILD_DIR: str = "none"
+
+# Containers for all temporary directories or files.
+# All temporary files will be deleted at the end.
 REMOVE_DIR = set()
 REMOVE_FILE = set()
 
@@ -115,6 +119,18 @@ class CustomSdist(sdist.sdist):
         super().run()
 
 
+class CustomBdistWheel(bdist_wheel):
+
+    def get_tag(self):
+        impl_tag, abi_tag, plat_tag = super().get_tag()
+        if os.name == "nt":
+            plat_tag = "win_amd64"
+        elif sys.platform == "linux":
+            plat_tag = "manylinux2014_x86_64"
+
+        return "py3", "none", plat_tag
+
+
 class CustomInstallLib(install_lib.install_lib):
 
     logger = logging.getLogger("UTBoost install_lib")
@@ -187,7 +203,8 @@ if __name__ == "__main__":
         cmdclass={
             "build_ext": CMakeBuild,
             "sdist": CustomSdist,
-            "install_lib": CustomInstallLib
+            "install_lib": CustomInstallLib,
+            'bdist_wheel': CustomBdistWheel
         },
         include_package_data=True,
         url="https://github.com/jd-opensource/UTBoost",

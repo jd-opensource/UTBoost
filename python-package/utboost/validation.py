@@ -1,7 +1,9 @@
 # -*- coding:utf-8 -*-
+import os
+import re
 import numpy as np
 
-from typing import Any
+from typing import Any, Tuple
 
 
 def check_binary(x: np.ndarray):
@@ -54,9 +56,36 @@ def check_incremental_group(indicator: np.ndarray) -> np.ndarray:
         return uniques
 
 
-def is_numpy_2d_array(data: Any) -> bool:
-    return isinstance(data, np.ndarray) and len(data.shape) == 2 and data.shape[1] > 1
+def check_numpy_nd_array(data: Any, nd: int):
+    """ Check if obj is ndarray with expected dimension. """
+    if not isinstance(data, np.ndarray):
+        raise TypeError("The input data is not an numpy.ndarray object, "
+                         "it is of type {}.".format(type(data).__name__))
+
+    if len(data.shape) != nd:
+        raise ValueError("The dimension of the input data ({:d}) "
+                         "is not equal to the expected dimension ({:d}).".format(len(data.shape), nd))
 
 
-def is_numpy_1d_array(data: Any) -> bool:
-    return isinstance(data, np.ndarray) and len(data.shape) == 1
+def check_libsvm_file(file_path: str) -> Tuple[int, int]:
+    """ Check if the file matches the libsvm format. """
+    if not os.path.isfile(file_path):
+        raise FileNotFoundError(f"The file '{file_path}' does not exist.")
+
+    with open(file_path, 'r') as file:
+        first_line = file.readline().strip()
+
+    patterns = (
+        # <index1>:<value1> <index2>:<value2> ... <indexN>:<valueN>
+        (re.compile(r'^((\d+:\S+\s*)+)$'), (-1, -1)),
+        # <label> <index1>:<value1> <index2>:<value2> ... <indexN>:<valueN>
+        (re.compile(r'^\d+\s+((\d+:\S+\s*)+)$'), (0, -1)),
+        # <label> <treatment> <index1>:<value1> <index2>:<value2> ... <indexN>:<valueN>
+        (re.compile(r'^\d+\s+\d+\s+((\d+:\S+\s*)+)$'), (0, 1)),
+    )
+
+    for pattern, ret in patterns:
+        if pattern.match(first_line):
+            return ret
+
+    raise IOError(f"The file '{file_path}' does not match the libsvm format.")

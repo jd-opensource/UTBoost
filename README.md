@@ -25,7 +25,7 @@ model = UTBClassifier(
 )
 
 # fit model
-model.fit(X=X_train, T=T_train, y=y_train)
+model.fit(X=X_train, ti=ti_train, y=y_train)
 
 # predict outcomes
 preds = model.predict(X_test)

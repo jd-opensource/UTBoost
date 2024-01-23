@@ -2,6 +2,7 @@
 
 #include "UTBoost/c_api.h"
 #include "UTBoost/dataset.h"
+#include "UTBoost/definition.h"
 
 #include "utils.h"
 
@@ -26,11 +27,11 @@ class ApiTest : public testing::Test {
                          "bin_construct_sample_cnt=5000\t"
                          "verbose=0";
     // train
-    UTB_CreateDataset(feature.data(), nrow, ncol, nullptr, &train, params);
+    UTB_CreateDataset(feature.data(), nrow, ncol, TYPE_FLOAT32, nullptr, &train, params);
     UTB_DatasetSetMeta(train, "treatment", treatment.data(), nrow, params);
     UTB_DatasetSetMeta(train, "label", label.data(), nrow, params);
     // valid
-    UTB_CreateDataset(feature.data(), nrow, ncol, train, &valid, params);
+    UTB_CreateDataset(feature.data(), nrow, ncol, TYPE_FLOAT32, train, &valid, params);
     UTB_DatasetSetMeta(valid, "treatment", treatment.data(), nrow, params);
     UTB_DatasetSetMeta(valid, "label", label.data(), nrow, params);
   }
@@ -48,7 +49,7 @@ class ApiTest : public testing::Test {
   int nrow, ncol;
   std::vector<float> label;
   std::vector<int> treatment;
-  std::vector<double> sparse_feature, feature;
+  std::vector<float> sparse_feature, feature;
 };
 
 
@@ -120,7 +121,7 @@ TEST_F(ApiTest, UTB_BoosterPredictForMat) {
   }
   std::vector<double> results(10 * 2, 0);
   int out_len;
-  UTB_BoosterPredictForMat(booster, feature.data(), 10, ncol, 0, round, params, &out_len, results.data());
+  UTB_BoosterPredictForMat(booster, feature.data(), 10, ncol, TYPE_FLOAT64, 0, round, params, &out_len, results.data());
   UTB_BoosterSaveModel(booster, 0, round, 1, "model.m");
   UTB_BoosterDumpModelToFile(booster, 0, round, "model.json");
   BoosterHandle new_booster;
@@ -129,7 +130,7 @@ TEST_F(ApiTest, UTB_BoosterPredictForMat) {
   std::vector<double> new_results(10 * 2, 0);
   UTB_BoosterCreateFromModelfile("model.m", &num_iter, &num_treat, &new_booster);
   ASSERT_EQ(max_round, num_iter);
-  UTB_BoosterPredictForMat(new_booster, feature.data(), 10, ncol, 0, num_iter, params, &out_len, new_results.data());
+  UTB_BoosterPredictForMat(new_booster, feature.data(), 10, ncol, TYPE_FLOAT64, 0, num_iter, params, &out_len, new_results.data());
   for (int i = 0; i < results.size(); ++i) {
     ASSERT_EQ(results[i], new_results[i]);
   }

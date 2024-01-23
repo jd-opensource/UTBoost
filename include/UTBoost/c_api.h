@@ -18,6 +18,7 @@
  * \param num_threads number of threads
  * \param out_num_row pointer to store the number of rows in file
  * \param out pointer to store the handle of the newly created parser
+ * \return An integer indicating the success or failure of the operation.
  */
 UTBOOST_C_EXPORT int UTB_ParseLibsvm(const char* filename,
                                      int32_t label_idx,
@@ -32,6 +33,7 @@ UTBOOST_C_EXPORT int UTB_ParseLibsvm(const char* filename,
  * \param features pointer to feature data
  * \param labels pointer to label data
  * \param treatments pointer to treatment indicator
+ * \return An integer indicating the success or failure of the operation.
  */
 UTBOOST_C_EXPORT int UTB_MoveLibsvm(ParserHandle handle,
                                     int32_t max_idx,
@@ -42,7 +44,7 @@ UTBOOST_C_EXPORT int UTB_MoveLibsvm(ParserHandle handle,
 /*!
  * \brief Free space for Parser.
  * \param handle Handle of parser to be freed
- * \return 0 when succeed, -1 when failure happens
+ * \return An integer indicating the success or failure of the operation.
  */
 UTBOOST_C_EXPORT int UTB_FreeParser(ParserHandle handle);
 
@@ -62,30 +64,68 @@ UTBOOST_C_EXPORT int UTB_DatasetSetMeta(DatasetHandle handle,
                                         const char* params);
 
 /*!
- * \brief Create a dataset
- *
- * Creates a dataset using the provided data.
- *
+ * \brief Creates a dataset using the provided data.
  * \param data2d Pointer to the data
  * \param num_row Number of rows in the dataset
  * \param num_col Number of columns in the dataset
  * \param reference Handle to the reference dataset
  * \param out Pointer to store the handle of the newly created dataset
  * \param params Parameter string
- * \return Returns the handle of the created dataset
+ * \return An integer indicating the success or failure of the operation.
  */
 UTBOOST_C_EXPORT int UTB_CreateDataset(const void* data2d,
                                        data_size_t num_row,
                                        int32_t num_col,
+                                       int data_type,
                                        DatasetHandle reference,
                                        DatasetHandle* out,
                                        const char* params);
 
 /*!
+ * \brief Create a dataset from CSR matrix.
+ * \param indptr Pointer to row headers
+ * \param indptr_type Type of indptr
+ * \param indices Pointer to column indices
+ * \param data Pointer to the data
+ * \param data_type Type of data
+ * \param nindptr Number of rows in the matrix + 1
+ * \param num_col Number of columns
+ * \param reference Handle to the reference dataset
+ * \param out Pointer to store the handle of the newly created dataset
+ * \param params Parameter string
+ * \return An integer indicating the success or failure of the operation.
+ */
+UTBOOST_C_EXPORT int UTB_CreateDatasetFromCSR(const void* indptr,
+                                              int indptr_type,
+                                              const int32_t* indices,
+                                              const void* data,
+                                              int data_type,
+                                              int64_t nindptr,
+                                              int32_t num_col,
+                                              DatasetHandle reference,
+                                              DatasetHandle* out,
+                                              const char* params);
+
+/*!
+ * \brief Load dataset from file with libsvm format.
+ * \param filename The name of the file
+ * \param params Parameter string
+ * \param reference Handle to the reference dataset
+ * \param out Pointer to store the handle of the newly created dataset
+ * \return An integer indicating the success or failure of the operation.
+ */
+UTBOOST_C_EXPORT int UTB_DatasetCreateFromLibsvm(const char* filename,
+                                                 int32_t label_idx,
+                                                 int32_t treatment_idx,
+                                                 const char* params,
+                                                 DatasetHandle reference,
+                                                 DatasetHandle* out);
+
+/*!
  * \brief Save dataset to text file, intended for debugging use only.
  * \param handle Handle of dataset
  * \param filename The name of the file
- * \return 0 when succeed, -1 when failure happens
+ * \return An integer indicating the success or failure of the operation.
  */
 UTBOOST_C_EXPORT int UTB_DatasetDumpMapper(DatasetHandle handle,
                                            const char* filename);
@@ -93,7 +133,7 @@ UTBOOST_C_EXPORT int UTB_DatasetDumpMapper(DatasetHandle handle,
 /*!
  * \brief Free space for dataset.
  * \param handle Handle of dataset to be freed
- * \return 0 when succeed, -1 when failure happens
+ * \return An integer indicating the success or failure of the operation.
  */
 UTBOOST_C_EXPORT int UTB_DatasetFree(DatasetHandle handle);
 
@@ -116,7 +156,7 @@ UTBOOST_C_EXPORT int UTB_CreateBooster(DatasetHandle train_data,
 /*!
  * \brief Free space for booster.
  * \param handle Handle of booster to be freed
- * \return 0 when succeed, -1 when failure happens
+ * \return An integer indicating the success or failure of the operation.
  */
 UTBOOST_C_EXPORT int UTB_BoosterFree(BoosterHandle handle);
 
@@ -135,7 +175,7 @@ UTBOOST_C_EXPORT int UTB_BoosterUpdateOneIter(BoosterHandle handle, int* is_fini
 /*!
  * \brief Rollback one iteration.
  * \param handle Handle of booster
- * \return 0 when succeed, -1 when failure happens
+ * \return An integer indicating the success or failure of the operation.
  */
 UTBOOST_C_EXPORT int UTB_BoosterRollbackOneIter(BoosterHandle handle);
 
@@ -148,7 +188,7 @@ UTBOOST_C_EXPORT int UTB_BoosterRollbackOneIter(BoosterHandle handle);
  * \param data_idx Index of data, 0: training data, 1: 1st validation data, 2: 2nd validation data and so on
  * \param[out] out_len Length of output result
  * \param[out] out_results Array with evaluation results
- * \return 0 when succeed, -1 when failure happens
+ * \return An integer indicating the success or failure of the operation.
  */
 UTBOOST_C_EXPORT int UTB_BoosterGetEval(BoosterHandle handle,
                                         int data_idx,
@@ -166,6 +206,7 @@ UTBOOST_C_EXPORT int UTB_BoosterGetEval(BoosterHandle handle,
  * \param data2d A pointer to the 2-dimensional data matrix.
  * \param nrow The number of rows in the data matrix.
  * \param ncol The number of columns in the data matrix.
+ * \param data_type Type of data matrix.
  * \param start_iteration The starting iteration for prediction.
  * \param num_iteration The number of iterations for prediction.
  * \param parameter The parameters for prediction.
@@ -177,6 +218,7 @@ UTBOOST_C_EXPORT int UTB_BoosterPredictForMat(BoosterHandle handle,
                                               const void* data2d,
                                               int32_t nrow,
                                               int32_t ncol,
+                                              int data_type,
                                               int start_iteration,
                                               int num_iteration,
                                               const char* parameter,
@@ -190,7 +232,7 @@ UTBOOST_C_EXPORT int UTB_BoosterPredictForMat(BoosterHandle handle,
  * \param num_iteration Index of the iteration that should be saved, <= 0 means save all
  * \param feature_importance_type Type of feature importance
  * \param filename The name of the file
- * \return 0 when succeed, -1 when failure happens
+ * \return An integer indicating the success or failure of the operation.
  */
 UTBOOST_C_EXPORT int UTB_BoosterSaveModel(BoosterHandle handle,
                                           int start_iteration,
@@ -206,7 +248,7 @@ UTBOOST_C_EXPORT int UTB_BoosterSaveModel(BoosterHandle handle,
  * \param buffer_len String buffer length, if ``buffer_len < out_len``, you should re-allocate buffer
  * \param[out] out_len Actual output length
  * \param[out] out_str JSON format string of model, should pre-allocate memory
- * \return 0 when succeed, -1 when failure happens
+ * \return An integer indicating the success or failure of the operation.
  */
 UTBOOST_C_EXPORT int UTB_BoosterDumpModel(BoosterHandle handle,
                                           int start_iteration,
@@ -223,7 +265,7 @@ UTBOOST_C_EXPORT int UTB_BoosterDumpModel(BoosterHandle handle,
  * \param buffer_len String buffer length, if ``buffer_len < out_len``, you should re-allocate buffer
  * \param[out] out_len Actual output length
  * \param[out] out_str JSON format string of model, should pre-allocate memory
- * \return 0 when succeed, -1 when failure happens
+ * \return An integer indicating the success or failure of the operation.
  */
 UTBOOST_C_EXPORT int UTB_BoosterDumpModelToFile(BoosterHandle handle,
                                                 int start_iteration,
@@ -235,7 +277,7 @@ UTBOOST_C_EXPORT int UTB_BoosterDumpModelToFile(BoosterHandle handle,
  * \param filename Filename of model
  * \param[out] out_num_iterations Number of iterations of this booster
  * \param[out] out Handle of created booster
- * \return 0 when succeed, -1 when failure happens
+ * \return An integer indicating the success or failure of the operation.
  */
 UTBOOST_C_EXPORT int UTB_BoosterCreateFromModelfile(const char* filename,
                                                     int* out_num_iterations,
@@ -246,7 +288,7 @@ UTBOOST_C_EXPORT int UTB_BoosterCreateFromModelfile(const char* filename,
  * \brief Add new validation data to booster.
  * \param handle Handle of booster
  * \param valid_data Validation dataset
- * \return 0 when succeed, -1 when failure happens
+ * \return An integer indicating the success or failure of the operation.
  */
 UTBOOST_C_EXPORT int UTB_BoosterAddValidData(BoosterHandle handle,
                                              DatasetHandle valid_data);
@@ -257,7 +299,7 @@ UTBOOST_C_EXPORT int UTB_BoosterAddValidData(BoosterHandle handle,
  * \param num_iteration Number of iterations for which feature importance is calculated, <= 0 means use all
  * \param importance_type Method of importance calculation:
  * \param[out] out_results Result array with feature importance
- * \return 0 when succeed, -1 when failure happens
+ * \return An integer indicating the success or failure of the operation.
  */
 UTBOOST_C_EXPORT int UTB_BoosterFeatureImportance(BoosterHandle handle,
                                                   int num_iteration,
@@ -268,9 +310,17 @@ UTBOOST_C_EXPORT int UTB_BoosterFeatureImportance(BoosterHandle handle,
  * \brief Get number of features.
  * \param handle Handle of booster
  * \param[out] out_len Total number of features
- * \return 0 when succeed, -1 when failure happens
+ * \return An integer indicating the success or failure of the operation.
  */
 UTBOOST_C_EXPORT int UTB_BoosterGetNumFeature(BoosterHandle handle, int* out_len);
+
+/*!
+ * \brief Get number of treatments.
+ * \param handle Handle of booster
+ * \param[out] out_len Total number of features
+ * \return An integer indicating the success or failure of the operation.
+ */
+UTBOOST_C_EXPORT int UTB_BoosterGetNumTreatment(BoosterHandle handle, int* out_len);
 
 /*!
  * \brief Get string message of the last error.

@@ -22,14 +22,15 @@ void CreateRandomMetadata(int nrows, std::vector<float>* labels, std::vector<int
 /*!
  * Creates a dense Dataset of random values.
  */
-void CreateRandomDenseData(int nrows, int ncols, std::vector<double>* features, std::vector<float>* labels,
+template <typename T>
+void CreateRandomDenseData(int nrows, int ncols, std::vector<T>* features, std::vector<float>* labels,
                            std::vector<int>* treats) {
   UTBoost::Random rand(421);
   features->reserve(nrows * ncols);
 
   for (int32_t row = 0; row < nrows; row++) {
     for (int32_t col = 0; col < ncols; col++) {
-      features->push_back(rand.NextFloat());
+      features->push_back(static_cast<T>(rand.NextFloat()));
     }
   }
 
@@ -39,15 +40,16 @@ void CreateRandomDenseData(int nrows, int ncols, std::vector<double>* features, 
 /*!
  * Creates a sparse Dataset of random values.
  */
-void CreateRandomSparseData(int nrows, int ncols, double sparse_rate, std::vector<double>* features) {
+template <typename T>
+void CreateRandomSparseData(int nrows, int ncols, double sparse_rate, std::vector<T>* features) {
   UTBoost::Random rand(42);
   features->reserve(nrows * ncols);
   for (int32_t row = 0; row < nrows; row++) {
     for (int32_t col = 0; col < ncols; col++) {
       if (rand.NextFloat() < sparse_rate) {
-        features->push_back(NAN);
+        features->push_back(static_cast<T>(NAN));
       } else {
-        features->push_back(rand.NextFloat());
+        features->push_back(static_cast<T>(rand.NextFloat()));
       }
     }
   }

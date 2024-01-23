@@ -11,6 +11,18 @@
 #include <limits>
 #include <functional>
 
+#define TYPE_FLOAT32 (0)
+#define TYPE_FLOAT64 (1)
+#define TYPE_INT32 (2)
+#define TYPE_INT64 (3)
+
+/*!
+ * \brief An alternative to the sparse value,
+ * set to NAN means that the algorithm will try different ways of splitting.
+ */
+#define SPARSE_REPLACE_VALUE (0)
+#define PARSER_DEFAULT_VALUE (NAN)
+
 #ifdef __cplusplus
 #define UTBOOST_EXTERN_C extern "C"
 #else

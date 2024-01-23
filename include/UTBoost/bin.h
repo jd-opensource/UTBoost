@@ -183,13 +183,10 @@ class BinMapper {
    * \return bin index
    */
   inline bin_t GetBinIndex(double value) const {
-    if (std::isnan(value)) {
-      if (use_missing_) {
-        return num_bin_ - 1;
-      } else {  // The data set has NAN, but the number is too small and is treated as zero.
-        value = 0.0;
-      }
+    if (std::isnan(value)) {  // nan
+      return na_bin_;
     }
+
     int l = 0;
     int r = num_bin_ - 1;
     if (use_missing_) {
@@ -226,11 +223,17 @@ class BinMapper {
   /*! \brief Whether missing is treated specially */
   inline bool use_missing() const { return use_missing_; };
 
+  inline bin_t most_freq_bin() const { return most_freq_bin_; };
+
  private:
   // Number of bins
   int num_bin_;
   // Store upper bound for each bin
   std::vector<double> boundaries_;
+  // bin idx for nan
+  bin_t na_bin_;
+  // most frequency bin idx
+  bin_t most_freq_bin_;
   // whether missing is treated specially
   bool use_missing_;
   // whether feature is trivial
@@ -257,8 +260,11 @@ class FeatureBin {
    * \brief Constructor
    * \param num_samples number of sample
    */
-  explicit FeatureBin(data_size_t num_samples): data_(num_samples, 0) {}
-  ~FeatureBin() {}
+  explicit FeatureBin(data_size_t num_samples): data_(num_samples, 0), default_bin_(0) {}
+
+  FeatureBin(data_size_t num_samples, bin_t default_bin): data_(num_samples, default_bin), default_bin_(default_bin) {}
+
+  ~FeatureBin() = default;
 
   /*!
    * \brief Resize container
@@ -286,7 +292,10 @@ class FeatureBin {
    * \param row row index
    * \param value feature bin
    */
-  void inline InsertValue(data_size_t row, bin_t value) { data_[row] = value; }
+  void inline InsertValue(data_size_t row, bin_t value) {
+    if (value != default_bin_)
+      data_[row] = value;
+  }
 
   /*!
    * \brief Given gradient information of the input samples, construct histogram of this feature and copy it to out
@@ -359,6 +368,7 @@ class FeatureBin {
  private:
   // store bin data of this feature
   std::vector<bin_t> data_;
+  bin_t default_bin_;
 };
 
 

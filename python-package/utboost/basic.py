@@ -2,6 +2,8 @@
 import ctypes
 import warnings
 import json
+import re
+import scipy.sparse as sp
 import numpy as np
 
 from numpy import ndarray
@@ -9,7 +11,7 @@ from copy import deepcopy
 from typing import Any, Dict, List, Tuple, Union, Optional
 
 from .libpath import find_lib_path
-from .validation import is_numpy_2d_array, is_numpy_1d_array, check_consistent_length
+from .validation import check_consistent_length, check_numpy_nd_array, check_libsvm_file, check_incremental_group
 
 _EvalRetType = Tuple[str, str, float]  # data, metric, score
 _ModelHandle = ctypes.c_void_p
@@ -115,11 +117,11 @@ class FileParser:
             feature = np.full(
                 shape=self.num_rows * self.max_fidx,
                 fill_value=self.default,
-                dtype=np.float64
+                dtype=np.float32
             )
             label = np.zeros(self.num_rows, dtype=np.float32)
             treatment = np.zeros(self.num_rows, dtype=np.int32)
-            feature_ptr = feature.ctypes.data_as(ctypes.POINTER(ctypes.c_double))
+            feature_ptr = feature.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
             label_ptr = label.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
             treatment_ptr = treatment.ctypes.data_as(ctypes.POINTER(ctypes.c_int32))
             _safe_call(_LIB.UTB_MoveLibsvm(
@@ -148,7 +150,7 @@ def read_libsvm(
         filename: str,
         max_fidx: int,
         with_treatment: bool = False,
-        default_value: float = 0.0,
+        default_value: float = np.nan,
         n_threads: int = -1):
     """
     Read data from a libsvm file.
@@ -169,7 +171,7 @@ def read_libsvm(
         Maximum feature index.
     with_treatment : bool, optional (default=False)
         Whether the file contains treatment indicators.
-    default_value : float, optional (default=0.0)
+    default_value : float, optional (default=np.nan)
         The default feature value when the key-value pair is missing.
     n_threads : int, optional (default=-1)
         Number of parallel threads to use for training. (<=0 means using all threads)
@@ -276,52 +278,133 @@ def apply_model(float_features):
 """
 
 
+_C_TYPE_FLOAT32 = 0
+_C_TYPE_FLOAT64 = 1
+_C_TYPE_INT32 = 2
+_C_TYPE_INT64 = 3
+
+
+def _c_array_from_np1d(np1d, expect_type="float"):
+    """ Convert a numpy 1d-array to c array. """
+    check_numpy_nd_array(np1d, 1)
+    assert expect_type in ("float", "int")
+
+    if expect_type == "float" and np1d.dtype not in (np.float32, np.float64):
+        np1d = np.array(np1d, copy=True, dtype=np.float32)
+
+    if expect_type == "int" and np1d.dtype not in (np.int32, np.int64):
+        np1d = np.array(np1d, copy=True, dtype=np.int32)
+
+    if np1d.dtype == np.float32:
+        data_ptr = np1d.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
+        data_type = _C_TYPE_FLOAT32
+    elif np1d.dtype == np.float64:
+        data_ptr = np1d.ctypes.data_as(ctypes.POINTER(ctypes.c_double))
+        data_type = _C_TYPE_FLOAT64
+    elif np1d.dtype == np.int32:
+        data_ptr = np1d.ctypes.data_as(ctypes.POINTER(ctypes.c_int32))
+        data_type = _C_TYPE_INT32
+    elif np1d.dtype == np.int64:
+        data_ptr = np1d.ctypes.data_as(ctypes.POINTER(ctypes.c_int64))
+        data_type = _C_TYPE_INT64
+    else:
+        raise ValueError
+    return (data_ptr, data_type, np1d)
+
+
+def _extract_file_pattern(path) -> Tuple[str, str]:
+    """ Compile a regular expression pattern that captures the file type and file path
+        from a string formatted as 'file_type://file_path'.
+    """
+    pattern = re.compile(r'^(.*?):\/\/(.*?)$')
+    match = pattern.match(path)
+    if match:
+        return match.group(1).lower(), match.group(2)
+    else:
+        # If the pattern does not match, raise a ValueError indicating the format is incorrect.
+        raise ValueError(f"The string '{path}' does not match the required format: 'file_type://file_path'.")
+
+
 class Dataset:
+    """
+    Basic dataset class for managing and storing data in a format suitable for model training.
+
+    This class is designed to hold data in a structured form, including features, treatment indicators,
+    and target variables. It can be used to store either training or validation datasets, with the
+    ability to reference another dataset. Using this container while the training data is fixed avoids
+    the preprocessing of the raw data each time the model is trained, thereby optimizing the data handling
+    process.
+    """
+
+    _supported_type = (np.ndarray, sp.csr_matrix, str)
 
     def __init__(
             self,
-            data: np.ndarray,
+            data: Union[np.ndarray, str, sp.spmatrix],
             treatment: Optional[np.ndarray] = None,
-            weight: Optional[np.ndarray] = None,
             label: Optional[np.ndarray] = None,
             reference: Optional["Dataset"] = None,
     ):
         """
-        Initializes a Dataset object with input data, treatment, weight, label, and reference.
+        Initializes a Dataset object.
+
+        It is important to note that not specifying `treatment` and `label` may result in the dataset
+        not being suitable for training purposes. If this instance is meant to be a validation dataset,
+        a training dataset should be used as a reference.
+
+        Parameters
+        ----------
+        data : array-like, str, or csr_matrix
+            The feature matrix with shape (n_samples, n_features). If a string is provided, it is assumed
+            to be the path to the data file. If a sparse matrix is provided, it should be in CSR format.
+        treatment : array-like, optional
+            A 1D array of treatment indicators with shape (n_samples,). Represents whether each sample
+            is part of the treatment group or not.
+        label : array-like, optional
+            A 1D array of target variables with shape (n_samples,). These are the dependent variables
+            that the model aims to predict.
+        reference : Dataset, optional
+            A reference to another Dataset object. This can be used to ensure consistency between training
+            and validation datasets.
+
+        Raises
+        ------
+        TypeError
+            If the type of `data` is not one of the supported types.
         """
-        if not is_numpy_2d_array(data):
-            raise ValueError("data type is not 2d-array.")
+        if not isinstance(data, self._supported_type):
+            supported_types = ", ".join([stp.__name__ for stp in self._supported_type])
+            raise TypeError(f"Wrong type({type(data).__name__}) for data. Supported types: [{supported_types}].")
+
         self.data = data
         self.meta = dict()
-        for name, value in [("label", label), ("treatment", treatment), ("weight", weight)]:
+
+        for name, value in [("label", label), ("treatment", treatment)]:
             if value is not None:
+                check_numpy_nd_array(value, 1)
+                if name == "treatment":
+                    check_incremental_group(treatment)
+                if hasattr(self.data, "shape"):
+                    check_consistent_length(self.data, value)
                 self.meta[name] = value
+
         self.reference = reference
-        for key, value in self.meta.items():
-            if not is_numpy_1d_array(value):
-                raise ValueError("{name} type is not 1d-array.".format(name=key))
-
-            check_consistent_length(self.data, value)
-
         self.handle = None
         self.parameter_str = ""
         self.param_names = ["seed", "min_data_in_bin", "bin_construct_sample_cnt", "max_bin"]
-        self.treat_num = self._count_treatment()
 
     def __del__(self) -> None:
+        self._free_raw()
+        self._free_handle()
+
+    def _free_handle(self) -> None:
         if self.handle is not None:
             _safe_call(_LIB.UTB_DatasetFree(self.handle))
             self.handle = None
 
-    def _count_treatment(self) -> int:
-        """
-        Counts the number of unique treatments in the dataset
-        """
-        if "treatment" in self.meta.keys():
-            t_set = set(self.meta["treatment"])
-            return len(t_set)
-        else:
-            return 0
+    def _free_raw(self):
+        self.data = None
+        self.meta = None
 
     def _parameter_to_str(self, param: Dict[str, Union[str, float, int]]) -> str:
         """ Converts the parameter dictionary to a string representation. """
@@ -349,12 +432,67 @@ class Dataset:
             )
 
     def save_binmapper(self, filename: str):
-        """ Saves the bin mapper to a file. """
+        """ Saves the bin mapper info to a file. """
         if self.handle is not None:
             _safe_call(_LIB.UTB_DatasetDumpMapper(
                 self.handle,
                 _c_str(filename))
             )
+
+    def _create_from_numpy(self, ref_handle):
+        """ Create dataset from a numpy.ndarray. """
+        check_numpy_nd_array(self.data, 2)
+        if self.data.dtype in (np.float32, np.float64):
+            data = np.array(self.data.reshape(self.data.size), dtype=self.data.dtype, copy=False)
+        else:
+            data = np.array(self.data.reshape(self.data.size), dtype=np.float32, copy=True)
+
+        data_ptr, data_type, _ = _c_array_from_np1d(data, expect_type="float")
+
+        _safe_call(_LIB.UTB_CreateDataset(
+            data_ptr,
+            ctypes.c_int32(self.data.shape[0]),
+            ctypes.c_int32(self.data.shape[1]),
+            ctypes.c_int32(data_type),
+            ref_handle,
+            ctypes.byref(self.handle),
+            _c_str(self.parameter_str))
+        )
+
+    def _create_from_csr(self, ref_handle):
+        """ Create dataset from a csr matrix. """
+        indptr_data, indptr_type, _ = _c_array_from_np1d(self.data.indptr, expect_type="int")
+        ptr_data, ptr_type, __ = _c_array_from_np1d(self.data.data, expect_type="float")
+        csr_indices = self.data.indices.astype(np.int32, copy=False)
+
+        _safe_call(_LIB.UTB_CreateDatasetFromCSR(
+            indptr_data,
+            ctypes.c_int32(indptr_type),
+            csr_indices.ctypes.data_as(ctypes.POINTER(ctypes.c_int32)),
+            ptr_data,
+            ctypes.c_int32(ptr_type),
+            ctypes.c_int64(len(self.data.indptr)),
+            ctypes.c_int32(self.data.shape[1]),
+            ref_handle,
+            ctypes.byref(self.handle),
+            _c_str(self.parameter_str))
+        )
+
+    def _create_from_file(self, ref_handle):
+        """ Create dataset from a file. """
+        file_type, path = _extract_file_pattern(self.data)
+        if file_type == "libsvm":
+            label_idx, treatment_idx = check_libsvm_file(path)
+            _safe_call(_LIB.UTB_DatasetCreateFromLibsvm(
+                _c_str(path),
+                ctypes.c_int32(label_idx),
+                ctypes.c_int32(treatment_idx),
+                _c_str(self.parameter_str),
+                ref_handle,
+                ctypes.byref(self.handle))
+            )
+        else:
+            raise TypeError(f"Unknown type of file: {file_type}")
 
     def build(self, params: Dict[str, Union[str, float, int]]) -> "Dataset":
         """ Builds the dataset with the given parameters. """
@@ -362,22 +500,25 @@ class Dataset:
             if self.parameter_str == self._parameter_to_str(params):
                 return self
             else:
-                self.__del__()
+                if self.data is None:
+                    raise RuntimeError("The raw data has been released, please re-instantiate the object.")
+                self._free_handle()
+
         self.parameter_str = self._parameter_to_str(params)
         self.handle = ctypes.c_void_p()
-        data = np.array(self.data.reshape(self.data.size), dtype=np.float64)
-        data_ptr = data.ctypes.data_as(ctypes.POINTER(ctypes.c_double))
         ref_handle = self.reference.handle if self.reference else None
-        _safe_call(_LIB.UTB_CreateDataset(
-            data_ptr,
-            ctypes.c_int32(self.data.shape[0]),
-            ctypes.c_int32(self.data.shape[1]),
-            ref_handle,
-            ctypes.byref(self.handle),
-            _c_str(self.parameter_str))
-        )
+
+        if isinstance(self.data, np.ndarray):
+            self._create_from_numpy(ref_handle)
+        elif isinstance(self.data, sp.csr_matrix):
+            self._create_from_csr(ref_handle)
+        elif isinstance(self.data, str):
+            self._create_from_file(ref_handle)
+        else:
+            raise TypeError("Unsupported feature data type: {}".format(type(self.data).__name__))
 
         self._set_field()
+        self._free_raw()
         return self
 
 
@@ -397,11 +538,9 @@ class _ModelBase:
         self.train_dataset = train_dataset
         self.valid_sets: List[Dataset] = []
         self.iters = ctypes.c_int(0)
-        self.treat_num = 0
         if train_dataset is not None:
             self.handle = ctypes.c_void_p()
             train_dataset.build(self.params)
-            self.treat_num = train_dataset.treat_num
             _safe_call(_LIB.UTB_CreateBooster(
                 train_dataset.handle,
                 _c_str(self.params_str),
@@ -414,6 +553,7 @@ class _ModelBase:
             raise ValueError("Since both train_dataset and model_file are None types, the model cannot be created.")
 
     def __del__(self) -> None:
+        """ Free handle """
         if self.handle is not None:
             _safe_call(_LIB.UTB_BoosterFree(self.handle))
             self.handle = None
@@ -504,6 +644,7 @@ class _ModelBase:
             self.iters.value -= 1
         return True
 
+    @property
     def num_feature(self) -> int:
         """ Returns the number of features in the model. """
         num_feature = ctypes.c_int(0)
@@ -512,6 +653,16 @@ class _ModelBase:
             ctypes.byref(num_feature)
         ))
         return num_feature.value
+
+    @property
+    def num_treatment(self) -> int:
+        """ Returns the number of treatments in the model. """
+        num_treatment = ctypes.c_int(0)
+        _safe_call(_LIB.UTB_BoosterGetNumTreatment(
+            self.handle,
+            ctypes.byref(num_treatment)
+        ))
+        return num_treatment.value
 
     def save(self,
              filename: str,
@@ -599,22 +750,30 @@ class _ModelBase:
             ctypes.byref(out_num_treat),
             ctypes.byref(self.handle)
         ))
-        self.treat_num = out_num_treat.value
 
-    def predict(self, data: np.ndarray, start_iteration: int = 0,
-                num_iteration: Optional[int] = None) -> np.ndarray:
+    def predict(self, data: np.ndarray, start_iteration: int = 0, num_iteration: Optional[int] = None) -> np.ndarray:
         """ Makes predictions using the model. """
+        check_numpy_nd_array(data=data, nd=2)
+        assert data.shape[1] == self.num_feature
+
         num_iteration = -1 if (num_iteration is None) or (num_iteration > self.iters.value) else num_iteration
-        n_preds = self.treat_num * data.shape[0]
+        n_preds = self.num_treatment * data.shape[0]
         out_num_preds = ctypes.c_int64(0)
-        mat = np.array(data.reshape(data.size), dtype=np.float64)
-        mat_ptr = mat.ctypes.data_as(ctypes.POINTER(ctypes.c_double))
+
+        if data.dtype in (np.float32, np.float64):
+            mat = np.array(data.reshape(data.size), dtype=data.dtype, copy=False)
+        else:
+            mat = np.array(data.reshape(data.size), dtype=np.float32, copy=True)
+
+        mat_ptr, mat_type, _ = _c_array_from_np1d(mat, expect_type="float")
+
         out_preds = np.empty(n_preds, dtype=np.float64)
         _safe_call(_LIB.UTB_BoosterPredictForMat(
             self.handle,
             mat_ptr,
             ctypes.c_int32(data.shape[0]),
             ctypes.c_int32(data.shape[1]),
+            ctypes.c_int32(mat_type),
             ctypes.c_int32(start_iteration),
             ctypes.c_int32(num_iteration),
             _c_str(self.params_str),
@@ -624,7 +783,7 @@ class _ModelBase:
         if n_preds != out_num_preds.value:
             raise ValueError("The size of the prediction does not match, "
                              "from {:d} to {:d}.".format(n_preds, out_num_preds.value))
-        return out_preds.reshape((data.shape[0], self.treat_num))
+        return out_preds.reshape((data.shape[0], self.num_treatment))
 
     def feature_importance(self,
                            importance_type: str = "split",
@@ -634,7 +793,7 @@ class _ModelBase:
         if iteration is None:
             iteration = self.iters.value
         imp_type = 0 if importance_type == "split" else 1
-        result = np.empty(self.num_feature(), dtype=np.float64)
+        result = np.empty(self.num_feature, dtype=np.float64)
         _safe_call(_LIB.UTB_BoosterFeatureImportance(
             self.handle,
             ctypes.c_int(iteration),

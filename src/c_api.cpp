@@ -4,6 +4,8 @@
  */
 
 #include "UTBoost/c_api.h"
+
+#include <memory>
 #include "UTBoost/definition.h"
 #include "UTBoost/dataset.h"
 #include "UTBoost/config.h"
@@ -148,14 +150,14 @@ class Booster {
 }  // namespace UTBoost
 
 
-
 using namespace UTBoost;
 
 Dataset* BuildDataset(double** sample_values, int num_col, int num_row, int max_bucket, int min_data_in_bucket, data_size_t total_n_row) {
   std::vector<std::unique_ptr<BinMapper>> mappers(num_col);
   TIMER_START(x);
+  #pragma omp parallel for schedule(dynamic)
   for (int i = 0; i < num_col; ++i) {
-      mappers[i].reset(new BinMapper());
+    mappers[i].reset(new BinMapper());
       mappers[i]->FindBoundary(sample_values[i], num_row, max_bucket, min_data_in_bucket);
   }
   TIMER_STOP(x);
@@ -165,20 +167,93 @@ Dataset* BuildDataset(double** sample_values, int num_col, int num_row, int max_
   return dataset.release();
 }
 
+template<typename T>
 std::function<std::vector<double>(int row_idx)> DenseRow2Vector(const void* data, int num_col) {
-  auto data_ptr = reinterpret_cast<const double*>(data);
+  const T* data_ptr = reinterpret_cast<const T*>(data);
   return [=](int row_idx) {
-
     std::vector<double> ret(num_col);
-    auto tmp_ptr = data_ptr + num_col * row_idx;
-
+    auto tmp_ptr = data_ptr + static_cast<size_t>(num_col) * row_idx;
     for (int i = 0; i < num_col; ++i) {
-      ret[i] = (*(tmp_ptr + i));
+      ret[i] = static_cast<double>(*(tmp_ptr + i));
     }
     return ret;
   };
 }
 
+template<typename T, typename T1, typename T2>
+std::function<std::vector<double>(int row_idx)>
+SparseRow2Vector(const void* indptr, const int32_t* indices, const void* data, int num_col) {
+  const T1* data_ptr = reinterpret_cast<const T1*>(data);
+  const T2* ptr_indptr = reinterpret_cast<const T2*>(indptr);
+  return [=] (T idx) {
+    std::vector<double> ret(num_col, SPARSE_REPLACE_VALUE);
+    int64_t start = ptr_indptr[idx];
+    int64_t end = ptr_indptr[idx + 1];
+    for (int64_t i = start; i < end; ++i) {
+      ret[indices[i]] = data_ptr[i];
+    }
+    return ret;
+  };
+}
+
+std::function<std::vector<double>(int row_idx)>
+GetDenseRowFunctionByType(const void* data, int num_row, int num_col, int data_type) {
+  if (data_type == TYPE_FLOAT32) {
+    return DenseRow2Vector<float>(data, num_col);
+  } else if (data_type == TYPE_FLOAT64) {
+    return DenseRow2Vector<double>(data, num_col);
+  }
+  Log::Error("Unknown data type in GetDenseRowFunctionByType");
+  return nullptr;
+}
+
+std::function<std::vector<std::pair<int, double>>(int row_idx)>
+RowPairFunctionFromDenseMatric(const void* data, int num_row, int num_col, int data_type) {
+  auto inner_function = GetDenseRowFunctionByType(data, num_row, num_col, data_type);
+  if (inner_function != nullptr) {
+    return [inner_function](int row_idx) {
+      auto raw_values = inner_function(row_idx);
+      std::vector<std::pair<int, double>> ret;
+      ret.reserve(static_cast<int>(raw_values.size()));
+      for (int i = 0; i < static_cast<int>(raw_values.size()); ++i) {
+        ret.emplace_back(i, raw_values[i]);
+      }
+      return ret;
+    };
+  }
+  return nullptr;
+}
+
+template<typename T>
+std::function<std::vector<double>(int row_idx)>
+RowFunctionFromCSR(const void* indptr, int indptr_type, const int32_t* indices, const void* data, int data_type, int num_col) {
+  if (data_type == TYPE_FLOAT32) {
+    if (indptr_type == TYPE_INT32) {
+      return SparseRow2Vector<T, float, int32_t>(indptr, indices, data, num_col);
+    } else if (indptr_type == TYPE_INT64) {
+      return SparseRow2Vector<T, float, int64_t>(indptr, indices, data, num_col);
+    }
+  } else if (data_type == TYPE_FLOAT64) {
+    if (indptr_type == TYPE_INT32) {
+      return SparseRow2Vector<T, double, int32_t>(indptr, indices, data, num_col);
+    } else if (indptr_type == TYPE_INT64) {
+      return SparseRow2Vector<T, double, int64_t>(indptr, indices, data, num_col);
+    }
+  }
+  Log::Error("Unknown data type in RowFunctionFromCSR");
+  return nullptr;
+}
+
+std::function<std::vector<double>(int row_idx)>
+RowFunctionFromParser(std::unique_ptr<Parser>& parser_ptr) {
+  return [&parser_ptr](int row_idx) {
+    std::vector<double> ret(parser_ptr->num_cols(), PARSER_DEFAULT_VALUE);
+    for (auto p : parser_ptr->row_features(row_idx)) {
+      ret[p.first] = p.second;
+    }
+    return ret;
+  };
+}
 
 static inline std::vector<int32_t> CreateSampleIndices(data_size_t total_nrow, const Config& config) {
   Random rand(config.seed);
@@ -186,35 +261,33 @@ static inline std::vector<int32_t> CreateSampleIndices(data_size_t total_nrow, c
   return rand.Sample(total_nrow, sample_cnt);
 }
 
-
 int UTB_DatasetFree(DatasetHandle handle) {
   API_BEGIN()
   delete reinterpret_cast<Dataset*>(handle);
   API_END()
 }
 
-
-int UTB_CreateDataset(const void* data2d, data_size_t num_row, int32_t num_col, DatasetHandle reference, DatasetHandle* out, const char* params) {
-  API_BEGIN()
-  Config config_;
-  config_.ParseParameters(params);
-  OMP_SET_NUM_THREADS(config_.num_threads);
-  auto parse_function = DenseRow2Vector(data2d, num_col);
+void CreateDatasetFromRowFunction(
+    std::function<std::vector<double>(int row_idx)>& parse_function,
+    data_size_t num_row, int32_t num_col, DatasetHandle reference, DatasetHandle* out, Config& config) {
 
   std::unique_ptr<Dataset> data_ptr;
 
   if (reference == nullptr) {
-    auto sample_indices = CreateSampleIndices(num_row, config_);
+    auto sample_indices = CreateSampleIndices(num_row, config);
     Log::Debug(
         "Begin construct bin mappers, total %d, using %d" ,
         num_row, static_cast<int>(sample_indices.size())
     );
     std::vector<std::vector<double>> values(num_col);  // values[i] is the i-th feature
+    for (auto & value : values) {
+      value.reserve(sample_indices.size());
+    }
     TIMER_START(x);
     for (int idx : sample_indices) {
       auto row_values = parse_function(idx);
       for (size_t j = 0; j < row_values.size(); ++j) {
-        values[j].emplace_back(row_values[j]);
+        values[j].push_back(row_values[j]);
       }
     }
     TIMER_STOP(x);
@@ -223,7 +296,7 @@ int UTB_CreateDataset(const void* data2d, data_size_t num_row, int32_t num_col, 
     data_ptr.reset(
         BuildDataset(Vector2Ptr(values).data(), num_col,
                      static_cast<int>(sample_indices.size()),
-                     config_.max_bin, config_.min_data_in_bin, num_row)
+                     config.max_bin, config.min_data_in_bin, num_row)
     );
   } else {
     data_ptr.reset(new Dataset(num_row));
@@ -231,16 +304,78 @@ int UTB_CreateDataset(const void* data2d, data_size_t num_row, int32_t num_col, 
   }
 
   TIMER_START(y);
-  OMP_SET_NUM_THREADS(config_.num_threads);
+
   #pragma omp parallel for schedule(static)
   for (data_size_t i = 0; i < num_row; ++i) {
     auto row_values = parse_function(i);
     data_ptr->PushRow(i, row_values);
   }
+
   TIMER_STOP(y);
   Log::Debug("Loading data to Dataset cost %f seconds", TIMER_SEC(y));
 
   *out = data_ptr.release();
+}
+
+int UTB_CreateDataset(const void* data2d, data_size_t num_row, int32_t num_col, int data_type,
+                      DatasetHandle reference, DatasetHandle* out, const char* params) {
+  API_BEGIN()
+  Config config_;
+  config_.ParseParameters(params);
+  OMP_SET_NUM_THREADS(config_.num_threads);
+  auto parse_function = GetDenseRowFunctionByType(data2d, num_row, num_col, data_type);
+  CreateDatasetFromRowFunction(parse_function, num_row, num_col, reference, out, config_);
+  API_END()
+}
+
+int UTB_CreateDatasetFromCSR(const void* indptr,
+                             int indptr_type,
+                             const int32_t* indices,
+                             const void* data,
+                             int data_type,
+                             int64_t nindptr,
+                             int32_t num_col,
+                             DatasetHandle reference,
+                             DatasetHandle* out,
+                             const char* params) {
+  API_BEGIN()
+  Config config_;
+  config_.ParseParameters(params);
+  OMP_SET_NUM_THREADS(config_.num_threads);
+  auto parse_function = RowFunctionFromCSR<int>(indptr, indptr_type, indices, data, data_type, num_col);
+  auto num_row = static_cast<int32_t>(nindptr - 1);
+  CreateDatasetFromRowFunction(parse_function, num_row, num_col, reference, out, config_);
+  API_END()
+}
+
+int UTB_DatasetCreateFromLibsvm(const char* filename,
+                                int32_t label_idx,
+                                int32_t treatment_idx,
+                                const char* params,
+                                DatasetHandle reference,
+                                DatasetHandle* out) {
+  API_BEGIN()
+  Config config_;
+  config_.ParseParameters(params);
+  OMP_SET_NUM_THREADS(config_.num_threads);
+  auto parser_ptr = std::unique_ptr<Parser>(Parser::CreateParser("libsvm"));
+  parser_ptr->parseFile(filename, label_idx, treatment_idx, false);
+  auto parse_function = RowFunctionFromParser(parser_ptr);
+
+  int num_row = parser_ptr->num_samples();
+  int num_col = parser_ptr->num_cols();
+
+  CreateDatasetFromRowFunction(parse_function, num_row, num_col, reference, out, config_);
+
+  auto dataset = reinterpret_cast<Dataset*>(*out);
+
+  if (treatment_idx == 1) {
+    dataset->SetMetaTreatment(parser_ptr->treatments(), num_row);
+  }
+
+  if (label_idx == 0) {
+    dataset->SetMetaFloat("label", parser_ptr->labels(), num_row);
+  }
 
   API_END()
 }
@@ -252,7 +387,7 @@ int UTB_DatasetSetMeta(DatasetHandle handle, const char* name, const void* data1
   config_.ParseParameters(params);
   OMP_SET_NUM_THREADS(config_.num_threads);
   auto dataset = reinterpret_cast<Dataset*>(handle);
-  if(dataset == nullptr) {
+  if (dataset == nullptr) {
     Log::Error("Dataset is nullptr");
     return -1;
   }
@@ -289,7 +424,7 @@ int UTB_CreateBooster(DatasetHandle train_data, const char* parameters, BoosterH
 
 int UTB_BoosterUpdateOneIter(BoosterHandle handle, int* is_finished) {
   API_BEGIN()
-  Booster* ref_booster = reinterpret_cast<Booster*>(handle);
+  auto* ref_booster = reinterpret_cast<Booster*>(handle);
   if (ref_booster->TrainOneIter()) {
     *is_finished = 1;
   } else {
@@ -301,7 +436,7 @@ int UTB_BoosterUpdateOneIter(BoosterHandle handle, int* is_finished) {
 
 int UTB_BoosterGetEval(BoosterHandle handle, int data_idx, int* out_len, double* out_results) {
   API_BEGIN()
-  Booster* ref_booster = reinterpret_cast<Booster*>(handle);
+  auto* ref_booster = reinterpret_cast<Booster*>(handle);
   auto model = ref_booster->GetBoosting();
   auto result_buf = model->GetEvalAt(data_idx);
   *out_len = static_cast<int>(result_buf.size());
@@ -312,44 +447,11 @@ int UTB_BoosterGetEval(BoosterHandle handle, int data_idx, int* out_len, double*
 }
 
 
-std::function<std::vector<double>(int row_idx)> RowFunctionFromDenseMatric(const void* data ,
-                                                                           int num_row,
-                                                                           int num_col) {
-  const double* data_ptr = reinterpret_cast<const double*>(data);
-  return [=](int row_idx) {
-
-    std::vector<double> ret(num_col);
-    auto tmp_ptr = data_ptr + static_cast<int>(num_col)*row_idx;
-
-    for (int i = 0; i < num_col; ++i) {
-      ret[i] = static_cast<double>(*(tmp_ptr + i));
-    }
-    return ret;
-  };
-}
-
-
-std::function<std::vector<std::pair<int, double>>(int row_idx)>
-RowPairFunctionFromDenseMatric(const void* data, int num_row, int num_col) {
-  auto inner_function = DenseRow2Vector(data, num_col);
-  if (inner_function != nullptr) {
-    return [inner_function](int row_idx) {
-      auto raw_values = inner_function(row_idx);
-      std::vector<std::pair<int, double>> ret;
-      for (int i = 0; i < static_cast<int>(raw_values.size()); ++i) {
-        ret.emplace_back(i, raw_values[i]);
-      }
-      return ret;
-    };
-  }
-  return nullptr;
-}
-
-
 int UTB_BoosterPredictForMat(BoosterHandle handle,
                              const void* data2d,
                              int32_t nrow,
                              int32_t ncol,
+                             int data_type,
                              int start_iteration,
                              int num_iteration,
                              const char* parameter,
@@ -359,8 +461,8 @@ int UTB_BoosterPredictForMat(BoosterHandle handle,
   Config config;
   config.ParseParameters(parameter);
   OMP_SET_NUM_THREADS(config.num_threads);
-  Booster* ref_booster = reinterpret_cast<Booster*>(handle);
-  auto get_row_fun = RowPairFunctionFromDenseMatric(data2d, nrow, ncol);
+  auto* ref_booster = reinterpret_cast<Booster*>(handle);
+  auto get_row_fun = RowPairFunctionFromDenseMatric(data2d, nrow, ncol, data_type);
   ref_booster->Predict(start_iteration, num_iteration, nrow, ncol, get_row_fun,
                        config, out_result, out_len);
   API_END()
@@ -373,7 +475,7 @@ int UTB_BoosterSaveModel(BoosterHandle handle,
                          int feature_importance_type,
                          const char* filename) {
   API_BEGIN()
-  Booster* ref_booster = reinterpret_cast<Booster*>(handle);
+  auto* ref_booster = reinterpret_cast<Booster*>(handle);
   ref_booster->SaveModelToFile(start_iteration, num_iteration,
                                feature_importance_type, filename);
   API_END()
@@ -386,7 +488,7 @@ int UTB_BoosterDumpModel(BoosterHandle handle,
                          int64_t* out_len,
                          char* out_str) {
   API_BEGIN();
-  Booster* ref_booster = reinterpret_cast<Booster*>(handle);
+  auto* ref_booster = reinterpret_cast<Booster*>(handle);
   std::string model = ref_booster->DumpModel(start_iteration, num_iteration);
   *out_len = static_cast<int64_t>(model.size()) + 1;
   if (*out_len <= buffer_len) {
@@ -400,7 +502,7 @@ int UTB_BoosterDumpModelToFile(BoosterHandle handle,
                                int num_iteration,
                                const char* filename) {
   API_BEGIN()
-  Booster* ref_booster = reinterpret_cast<Booster*>(handle);
+  auto* ref_booster = reinterpret_cast<Booster*>(handle);
   ref_booster->DumpModelToFile(start_iteration, num_iteration, filename);
   API_END()
 }
@@ -421,15 +523,15 @@ int UTB_BoosterCreateFromModelfile(const char* filename,
 int UTB_BoosterAddValidData(BoosterHandle handle,
                             DatasetHandle valid_data) {
   API_BEGIN()
-  Booster* ref_booster = reinterpret_cast<Booster*>(handle);
-  Dataset* p_dataset = reinterpret_cast<Dataset*>(valid_data);
+  auto* ref_booster = reinterpret_cast<Booster*>(handle);
+  auto* p_dataset = reinterpret_cast<Dataset*>(valid_data);
   ref_booster->AddValidData(p_dataset);
   API_END()
 }
 
 int UTB_BoosterRollbackOneIter(BoosterHandle handle) {
   API_BEGIN()
-  Booster* ref_booster = reinterpret_cast<Booster*>(handle);
+  auto* ref_booster = reinterpret_cast<Booster*>(handle);
   ref_booster->RollbackOneIter();
   API_END()
 }
@@ -440,7 +542,7 @@ int UTB_BoosterFeatureImportance(BoosterHandle handle,
                                  double* out_results) {
 
   API_BEGIN()
-  Booster* ref_booster = reinterpret_cast<Booster*>(handle);
+  auto* ref_booster = reinterpret_cast<Booster*>(handle);
   std::vector<double> feature_importances = ref_booster->GetBoosting()->FeatureImportance(num_iteration, importance_type);
   for (size_t i = 0; i < feature_importances.size(); ++i) {
     (out_results)[i] = feature_importances[i];
@@ -450,8 +552,15 @@ int UTB_BoosterFeatureImportance(BoosterHandle handle,
 
 int UTB_BoosterGetNumFeature(BoosterHandle handle, int* out_len) {
   API_BEGIN()
-  Booster* ref_booster = reinterpret_cast<Booster*>(handle);
+  auto* ref_booster = reinterpret_cast<Booster*>(handle);
   *out_len = ref_booster->GetBoosting()->MaxFeatureIdx() + 1;
+  API_END()
+}
+
+int UTB_BoosterGetNumTreatment(BoosterHandle handle, int* out_len) {
+  API_BEGIN()
+  auto* ref_booster = reinterpret_cast<Booster*>(handle);
+  *out_len = ref_booster->GetBoosting()->GetNumTreatment();
   API_END()
 }
 
@@ -489,7 +598,7 @@ int UTB_MoveLibsvm(ParserHandle handle,
                    void* treatments) {
   API_BEGIN();
   auto parser = reinterpret_cast<LibsvmParser*>(handle);
-  auto feature_ptr = reinterpret_cast<double*>(features);
+  auto feature_ptr = reinterpret_cast<float*>(features);
   auto label_ptr = reinterpret_cast<label_t*>(labels);
   auto treatment_ptr = reinterpret_cast<treatment_t*>(treatments);
   parser->copyTo(feature_ptr, max_idx, label_ptr, treatment_ptr);

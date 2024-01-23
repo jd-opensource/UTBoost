@@ -24,6 +24,11 @@ def _auto_objective(obj: str, csplit: str) -> str:
 
 
 class UTBoostModel:
+    """
+    A basic model designed for uplift modeling, which aims to predict the incremental impact
+    of a treatment on an individual's behavior. This model supports various criteria for splitting and can be
+    used with different ensemble strategies.
+    """
 
     def __init__(
             self,
@@ -44,7 +49,7 @@ class UTBoostModel:
             scale_treat_weights: Optional[List[float]] = None,
             effect_constrains: Optional[List[int]] = None,
             auto_balance: bool = False,
-            subsample_for_binmapper: int = 200000,
+            subsample_for_binmapper: int = 100000,
             use_best_model: bool = False,
             eval_metric: Optional[List[str]] = None,
             early_stopping_rounds: int = -1,
@@ -53,49 +58,51 @@ class UTBoostModel:
             n_threads: int = -1,
             **kwargs
     ):
-        """
-        Initialize model
+        """ Initialize model
 
         Parameters
         ----------
         ensemble_type : str, optional (default="boosting")
-            Ensemble method of trees. Choose from one of the types: "boosting", "bagging".
+            The type of ensemble method to use for combining weak learners. Options include "boosting" for
+            gradient boosting and "bagging" for bootstrap aggregating.
         criterion : str, optional (default="gbm")
-            Evaluation criterion to find optimal split point.
+            The function to measure the quality of a split.
             "gbm", Gradient Boosting Decision Tree.
             "ddp", The difference of uplift between two leaves.
             "ed", Euclidean Distance.
             "kl", KL Divergence.
             "chi", Chi-Square statistic.
         num_leaves : int, optional (default=31)
-            The maximum number of leaves.
+            The maximum number of leaves in one tree.
         max_depth : int, optional (default=5)
-            The maximum depth of the tree.
+            The maximum depth of a tree. Used to control over-fitting.
         learning_rate : float, optional (default=0.1)
-            Boosting learning rate.
+            The step size shrinkage used in the update to prevent overfitting.
         iterations : int, optional (default=100)
             The maximum number of trees.
         subsample : float, optional (default=1.0)
-            Subsample ratio of the training instance.
+            The fraction of samples to be used for fitting the individual base learners.
         subsample_freq : int, optional (default=0)
             Frequency of subsample, <=0 means no enable.
         colsample : float, optional (default=1.0)
-            Subsample ratio of columns when constructing each tree.
+            The fraction of features to be used for training each tree. A value less than 1.0 can offer speed
+            improvements.
         use_honesty : bool, optional (default=False)
-            Whether to use different data to generate the tree and estimate the uplift value inside the leaves.
+            Whether to use honesty when building trees, i.e., using separate samples for creating the structure
+            of the tree and estimating the effect within the leaves.
         init_from_average : bool, optional (default=False)
-            Whether to initialize approximate values by best constant value for the specified criterion.
+             Whether to initialize the tree's predictions with the average target value or not.
         min_data_leaf : int, optional (default=20)
-            The minimum number of samples required to be split at a leaf node.
-        max_bin : int, optional (default=255)
+            The minimum number of samples required in a leaf node.
+        max_bin : int, optional (default=256)
             The maximum number of bins per feature.
         gbm_gain_type : str, optional (default="global")
-            How gain is computed in the gbm algorithm, Choose one from:
+            The method used to calculate gains during training. Options are:
             "global", Gain is computed from the full instance.
             "local", Gain is computed from the treated instance.
             "tau", Gain is computed from the ite-related parts.
         scale_treat_weights : list of float, optional (default=None)
-            Weights associated with control and each treated group. Works only when criterion="gbm".
+            The weights for balancing treatment groups. Only relevant when using "gbm" criterion.
             If None, all instances are supposed to have weight one.
         effect_constrains : list of int, optional (default=None)
             Impose monotonic constraints on causal effects.
@@ -105,12 +112,12 @@ class UTBoostModel:
             `0` — Constraints are disabled.
             Note, the length of effect_constrains must be equal to the number of treated group, if effect_constrains is not `None`.
         auto_balance : bool, optional (default=False)
-            Whether to automatically balance the weights of classes.
+            Whether to automatically adjust weights to balance class distributions.
             Use this parameter only for the case of gbm splitting criterion and binary classification.
             If True, the model will try to automatically balance the weight of the dominated label with pos/neg or
             neg/pos fraction in train set. Note, it will result in poor estimates of the individual class probabilities.
             If False, all classes are supposed to have weight one.
-        subsample_for_binmapper : int, optional (default=200000)
+        subsample_for_binmapper : int, optional (default=100000)
             Number of samples for constructing bins.
         use_best_model : bool, optional (default=False)
             If this parameter is True, the optimal number of trees is maintained based on the metric value.
@@ -123,18 +130,18 @@ class UTBoostModel:
             "qini_coff", Normalized qini area, applicable to binary outcome.
             "qini_area", Applicable to continuous & binary outcome.
         early_stopping_rounds : int, optional (default=-1)
-            Validation metric needs to improve at least once in every **early_stopping_rounds** round(s) to continue training.
+            The number of rounds without improvement in the validation metric to trigger early stopping.
             This parameter only takes effect when the value is greater than 0 and at least one metric is provided.
             If additional validation sets is provided, evaluation is based on the first one, otherwise it is based on the training set
         eval_period : int, optional (default=1)
             The frequency of iterations to calculate the values of metrics.
             Note, if eval_period is less than 1, early-stop will also not work.
         seed : int, optional (default=618)
-            Random number seed.
+            The random seed for reproducibility.
         n_threads : int, optional (default=-1)
             Number of parallel threads to use for training. (<=0 means using all threads)
         **kwargs
-            Other parameters for the model.
+            Other miscellaneous parameters that can be passed to the model.
         """
         self.ensemble_type = ensemble_type
         self.criterion = criterion
@@ -231,22 +238,22 @@ class UTBoostModel:
         self._params["boost_from_average"] = int(self.init_from_average)
 
         # max_bin
-        if self.max_bin > 2:
-            self._params["max_bin"] = self.max_bin
+        if self.max_bin < 2 or self.max_bin > 65535:
+            raise ValueError("Ensure that the value of max_bin between 2 and 65535.")
         else:
-            raise ValueError("Ensure that the value of max_bin is greater than 2.")
+            self._params["max_bin"] = self.max_bin
 
         # min_data_leaf
         if self.min_data_leaf > 0:
             self._params["min_data_leaf"] = self.min_data_leaf
         else:
-            raise ValueError("Ensure that the value of max_bin is greater than zero.")
+            raise ValueError("Ensure that the value of min_data_leaf is greater than zero.")
 
         # subsample_for_binmapper
-        if self.subsample_for_binmapper > 10000:
+        if self.subsample_for_binmapper > 10:
             self._params["bin_construct_sample_cnt"] = self.subsample_for_binmapper
         else:
-            raise ValueError("The value of subsample_for_binmapper must be greater than 10000.")
+            raise ValueError("The value of subsample_for_binmapper must be greater than 10.")
         # seed
         self._params["seed"] = self.seed
         self._params["bagging_seed"] = self.seed + 1
@@ -538,6 +545,7 @@ class UTBoostModel:
 
 
 class UTBClassifier(UTBoostModel):
+    """ Used for classification task """
 
     def _process_params(self):
         super()._process_params()
